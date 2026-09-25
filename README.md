@@ -48,6 +48,40 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Scripts\Setup.ps1
 UAC、ソフトウェアのライセンス、インストーラー画面での確認が必要になる場合があります。
 ライセンス同意はスクリプトで代行しません。再起動を要求された場合は再起動後に再実行してください。
 
+### `SETUP FAILED: Manual step...` と表示された場合
+
+次の順で表示された場合は、**最初からやり直したり、導入済みソフトを削除したりする必要はありません**。
+
+| 表示 | 意味 |
+|---|---|
+| Visual Studio Build Toolsの「インストールが完了しました」 | Build Toolsのインストーラーは正常終了 |
+| `WARNING: UE 5.6.x was not found...` | UE本体が未導入、またはインストール先を検出できていない |
+| Epic Games Launcherの「インストールが完了しました」 | Launcherの導入は完了。UE本体の導入とは別 |
+| `SETUP FAILED: Manual step: open Epic Games Launcher...` | UE本体の手動導入待ち。準備未完了を示すため、スクリプトが終了コード1で停止 |
+
+赤字の `FAILED` はこの場合、直前のBuild ToolsやLauncherのインストール失敗を意味しません。
+MSVC・SDKを含む最終チェックはUEが見つかった後に行うため、まだセットアップ完了ではありません。
+警告中の `D:\Epic Games\UE_5.6` は指定例であり、その場所にインストールする必要はありません。
+
+再開手順：
+
+1. **Windowsのスタートメニュー**からEpic Games Launcherを開く。
+2. **Launcher画面**で、次節の手順に従ってUE **5.6系** をインストールし、完了を待つ。
+3. **WindowsのPowerShell**で、リポジトリのフォルダ（例：`D:\work\ap5`）へ戻り、同じコマンドを再実行する。
+
+   ```powershell
+   powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Scripts\Setup.ps1
+   ```
+
+4. `SETUP_READY` が表示されたら、ビルドして起動する。
+
+   ```powershell
+   powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Scripts\BuildAndRun.ps1
+   ```
+
+UE 5.6を既に導入済みなら再インストールせず、次節の `-EngineRoot` で実際のインストール先を指定してください。
+再実行では検出できたMSVC 14.38のインストールをスキップします。別のエラーが表示された場合は、その内容に対応してください。
+
 ### 初回のみ手動：UE本体の導入（Epic Games Launcher画面）
 
 1. Epic Games Launcherを開き、Epicアカウントでサインイン。
