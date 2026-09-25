@@ -1,0 +1,21 @@
+name: Static checks (no UE build)
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  checks:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: false
+      - name: PowerShell 5.1 syntax
+        shell: powershell
+        run: ./Tests/Test-PowerShell.ps1
+      - name: PowerShell 7 syntax
+        shell: pwsh
+        run: ./Tests/Test-PowerShell.ps1
+      - name: Project and map-script tests (mocked UE API)
+        shell: pwsh
+        run: python -m unittest discover -s Tests -v
