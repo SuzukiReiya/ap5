@@ -2,7 +2,7 @@
   "FileVersion": 3,
   "EngineAssociation": "5.6",
   "Category": "Samples",
-  "Description": "Code-first floor and physics ball sample.",
+  "Description": "コード生成モンスターの形状と観察操作を検証するサンプル。",
   "Modules": [
     { "Name": "Ap5", "Type": "Runtime", "LoadingPhase": "Default" }
   ],

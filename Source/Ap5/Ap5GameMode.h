@@ -16,10 +16,8 @@ public:
     virtual void StartPlay() override;
 
 private:
-    // Hard references ensure the engine's basic shapes are included during cooking.
+    // 床の基本形状をCook対象に含めるための参照。
     UPROPERTY()
     TObjectPtr<UStaticMesh> FloorMesh;
 
-    UPROPERTY()
-    TObjectPtr<UStaticMesh> BallMesh;
 };
