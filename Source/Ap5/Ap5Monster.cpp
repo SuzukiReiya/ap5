@@ -25,10 +25,11 @@ namespace
 
     void AppendFace(UE::Geometry::FDynamicMesh3& Mesh, int32 A, int32 B, int32 C)
     {
-        const int32 Triangle = Mesh.AppendTriangle(A, B, C);
+        // UEの描画で外側が表になる順序にする。照明用の法線は外向きのまま。
+        const int32 Triangle = Mesh.AppendTriangle(A, C, B);
         check(Triangle >= 0);
         Mesh.Attributes()->PrimaryNormals()->SetTriangle(
-            Triangle, UE::Geometry::FIndex3i(A, B, C));
+            Triangle, UE::Geometry::FIndex3i(A, C, B));
     }
 }
 
