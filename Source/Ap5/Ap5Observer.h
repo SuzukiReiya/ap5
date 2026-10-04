@@ -19,7 +19,7 @@ private:
     void ResetView();
     void UpdateView();
     UPROPERTY()
-    TObjectPtr<ACameraActor> Camera;
+    TObjectPtr<ACameraActor> ObservationCamera;
     float Yaw = 210.0f;
     float Elevation = 12.0f;
     float Distance = 750.0f;

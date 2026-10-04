@@ -19,14 +19,14 @@ void AAp5Observer::BeginPlay()
     {
         return;
     }
-    Camera = GetWorld()->SpawnActor<ACameraActor>();
-    if (Camera == nullptr)
+    ObservationCamera = GetWorld()->SpawnActor<ACameraActor>();
+    if (ObservationCamera == nullptr)
     {
         UE_LOG(LogTemp, Error, TEXT("AP5_CAMERA_FAILED"));
         return;
     }
-    Camera->GetCameraComponent()->SetFieldOfView(50.0f);
-    SetViewTarget(Camera);
+    ObservationCamera->GetCameraComponent()->SetFieldOfView(50.0f);
+    SetViewTarget(ObservationCamera);
     FInputModeGameAndUI Mode;
     Mode.SetHideCursorDuringCapture(false);
     Mode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
@@ -45,20 +45,20 @@ void AAp5Observer::ResetView()
 
 void AAp5Observer::UpdateView()
 {
-    if (Camera == nullptr)
+    if (ObservationCamera == nullptr)
     {
         return;
     }
     const FVector Target(0, 0, 170);
     const FVector Offset = FRotator(Elevation, Yaw, 0).Vector() * Distance;
-    Camera->SetActorLocation(Target + Offset);
-    Camera->SetActorRotation((-Offset).Rotation());
+    ObservationCamera->SetActorLocation(Target + Offset);
+    ObservationCamera->SetActorRotation((-Offset).Rotation());
 }
 
 void AAp5Observer::PlayerTick(float DeltaTime)
 {
     Super::PlayerTick(DeltaTime);
-    if (!IsLocalController() || Camera == nullptr)
+    if (!IsLocalController() || ObservationCamera == nullptr)
     {
         return;
     }
