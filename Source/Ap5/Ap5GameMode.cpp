@@ -34,7 +34,7 @@ void AAp5GameMode::StartPlay()
         return;
     }
 
-    // UE units are centimetres. A thin cube gives the flat floor reliable collision.
+    // UEの長さ単位はcm。薄い立方体で床の衝突判定を確保する。
     AStaticMeshActor* Floor = World->SpawnActor<AStaticMeshActor>(
         FVector(0.0, 0.0, -10.0), FRotator::ZeroRotator);
     AStaticMeshActor* Ball = World->SpawnActor<AStaticMeshActor>(
@@ -69,6 +69,8 @@ void AAp5GameMode::StartPlay()
     UDirectionalLightComponent* KeyComponent = CastChecked<UDirectionalLightComponent>(KeyLight->GetLightComponent());
     KeyComponent->SetMobility(EComponentMobility::Movable);
     KeyComponent->SetIntensity(3.0f);
+    // 主光源を明示し、補助光との同順位による警告を防ぐ。
+    KeyComponent->SetForwardShadingPriority(1);
     UDirectionalLightComponent* FillComponent = CastChecked<UDirectionalLightComponent>(FillLight->GetLightComponent());
     FillComponent->SetMobility(EComponentMobility::Movable);
     FillComponent->SetIntensity(0.8f);
@@ -81,6 +83,12 @@ void AAp5GameMode::StartPlay()
     {
         Controller->bAutoManageActiveCameraTarget = false;
         Controller->SetViewTarget(Camera);
+        // 観察用サンプルではカーソルを表示し、ウィンドウ外へ移動できるようにする。
+        Controller->bShowMouseCursor = true;
+        FInputModeGameAndUI InputMode;
+        InputMode.SetHideCursorDuringCapture(false);
+        InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+        Controller->SetInputMode(InputMode);
     }
     else
     {
