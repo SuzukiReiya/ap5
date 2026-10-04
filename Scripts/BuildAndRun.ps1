@@ -15,7 +15,7 @@ try {
             # This is standalone uncooked gameplay, NOT a packaged distribution.
             # Piping the GUI executable through Invoke-Ap5Tool waits for its exit.
             Invoke-Ap5Tool -FilePath (Join-Path $resolvedEngine 'Engine\Binaries\Win64\UnrealEditor.exe') `
-                -Arguments @($script:ProjectFile, '/Game/Generated/Minimal', '-game', '-windowed', '-ResX=1280', '-ResY=720', '-d3d11', '-log', '-stdout', '-FullStdOutLogOutput') `
+                -Arguments @($script:ProjectFile, '/Game/Generated/Minimal', '-game', '-windowed', '-ResX=1280', '-ResY=720', '-d3d11', '-stdout', '-FullStdOutLogOutput') `
                 -LogName 'run.log'
         }
     }
