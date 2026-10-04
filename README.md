@@ -156,6 +156,14 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Scripts\BuildAndRun.ps
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Scripts\BuildAndRun.ps1 -BuildOnly
 ```
 
+
+### サンプルの見方と終了方法
+
+- ボールは中心の高さ250cmから一度だけ落下して床で止まります。半径は約50cmで、落下時間は約0.6秒のため、初回描画の準備中に着地している場合があります。
+- マウスカーソルを表示し、ウィンドウ内に固定しません。右上の×またはAlt＋F4で終了できます。Alt＋F4は通常の終了操作です。
+- 2026-10-04のユーザー提供ログで、UE 5.6.1のWindowsビルド・マップ生成・サンプル生成・正常終了を確認しました。画像で床と球の描画を確認しましたが、落下中の動きは未確認です。
+- カーソル表示と主光源の優先順位を修正した版は、Windowsでの再ビルド・実画面確認が必要です。
+
 ## 4. 配布用のWindowsゲームを作る（任意）
 
 ```powershell
