@@ -4,6 +4,10 @@ Windows上でスクリプトを実行すると、床・球1個・固定カメラ
 球が高さ250 cmから落下し、床の上に止まります。移動操作はまだありません。終了はウィンドウを閉じるかAlt+F4です。
 Blueprint作成、手動のモデル配置、手動のマップ保存は不要です。
 
+## 開発用チャット
+
+- [ap5の開発相談・作業履歴（ChatGPT）](https://chatgpt.com/c/6ab5f3bb-5964-83ee-b116-f59050211fe5)
+
 ## 対象環境
 
 - Windows 11 x64、Windows PowerShell 5.1またはPowerShell 7（WSLでは実行しません）
@@ -84,7 +88,13 @@ UE 5.6を既に導入済みなら再インストールせず、次節の `-Engin
 
 ### 初回のみ手動：UE本体の導入（Epic Games Launcher画面）
 
-1. Epic Games Launcherを開き、Epicアカウントでサインイン。
+今回の導入方法では、**Epic Games Launcherの起動とEpic Gamesアカウントでのサインインが必要**です。
+アカウントを持っていない場合は、Launcherの「アカウントを作成」から登録してください。既存アカウントがあれば新規登録は不要です。
+「後でサインイン」ではUE本体をダウンロードできません。
+
+LauncherはUE本体のダウンロード・更新管理に使用します。インストールとセットアップが完了した後の通常のビルド・ゲーム起動は、`BuildAndRun.ps1` がUEの実行ファイルを直接呼び出すため、毎回Launcherから起動する操作は不要です。
+
+1. Epic Games Launcherを開き、Epic Gamesアカウントを作成するか、既存アカウントでサインイン。
 2. **Unreal Engine → ライブラリ → エンジンバージョンの「＋」**。
 3. バージョン一覧から **5.6系** を選び、規約等を確認してインストール。
 4. **Windows用エンジン本体とEngine Contentを残す**。Android/iOS等の追加プラットフォームは不要。
