@@ -41,9 +41,7 @@ void AAp5Monster::BeginPlay()
         AddPart(FName(*(Prefix + TEXT("Foot"))), FVector(-17, Side * 38, 15), FVector(43, 28, 15));
     }
     InitialVolume.InitializeUnion(Shapes);
-    BodyVolume = InitialVolume;
-    BodyMesh = CreatePiece();
-    RebuildMesh(BodyMesh, BodyVolume);
+    ResetShape();
     UE_LOG(LogTemp, Display, TEXT("AP5_MONSTER_READY: shapes=%d volume_spacing_cm=5"), static_cast<int32>(Shapes.size()));
 }
 
@@ -75,10 +73,9 @@ UDynamicMeshComponent* AAp5Monster::CreatePiece()
     return Piece;
 }
 
-double AAp5Monster::RebuildMesh(UDynamicMeshComponent* Component, const Ap5Volume::Field& Volume)
+void AAp5Monster::RebuildMesh(int32 Index)
 {
-    const std::vector<Ap5Volume::Triangle> Surface = Volume.Surface();
-    double MinimumZ = 1e9;
+    const std::vector<Ap5Volume::Triangle> Surface = Pieces.Items[Index].RebuildSurface();
     UE::Geometry::FDynamicMesh3 Mesh;
     Mesh.EnableAttributes();
     for (const Ap5Volume::Triangle& Face : Surface)
@@ -89,7 +86,6 @@ double AAp5Monster::RebuildMesh(UDynamicMeshComponent* Component, const Ap5Volum
         {
             const Ap5Volume::Point& P = Face.Vertices[K];
             const Ap5Volume::Point& N = Face.Normals[K];
-            MinimumZ = FMath::Min(MinimumZ, P.Z);
             Vertices[K] = Mesh.AppendVertex(FVector3d(P.X, P.Y, P.Z));
             Normals[K] = Mesh.Attributes()->PrimaryNormals()->AppendElement(
                 FVector3f(static_cast<float>(N.X), static_cast<float>(N.Y), static_cast<float>(N.Z)));
@@ -99,24 +95,31 @@ double AAp5Monster::RebuildMesh(UDynamicMeshComponent* Component, const Ap5Volum
         Mesh.Attributes()->PrimaryNormals()->SetTriangle(Triangle,
             UE::Geometry::FIndex3i(Normals[0], Normals[1], Normals[2]));
     }
-    Component->SetMesh(MoveTemp(Mesh));
-    return Surface.empty() ? 0 : MinimumZ;
+    PieceMeshes[Index]->SetMesh(MoveTemp(Mesh));
+    PieceMeshes[Index]->SetRelativeLocation(FVector(0, 0, Pieces.Items[Index].Motion.OffsetZ));
+}
+
+void AAp5Monster::RefreshPieces(const std::vector<int>& Changed)
+{
+    while (PieceMeshes.Num() < static_cast<int32>(Pieces.Items.size())) PieceMeshes.Add(CreatePiece());
+    for (int32 Index : Changed) RebuildMesh(Index);
+    SetActorTickEnabled(true);
 }
 
 int32 AAp5Monster::ApplyBrush(const FVector& Start, const FVector& Direction, float Radius, bool bRepair)
 {
-    if (bRepair && bHasCut) return -1;
     const double Started = FPlatformTime::Seconds();
     const FVector LocalStart = GetActorTransform().InverseTransformPosition(Start);
     const FVector LocalDirection = GetActorTransform().InverseTransformVectorNoScale(Direction);
-    const int32 Changed = BodyVolume.Brush(
+    std::vector<int> Changed;
+    const int32 Samples = Pieces.Brush(
         Ap5Volume::Point(LocalStart.X, LocalStart.Y, LocalStart.Z),
-        Ap5Volume::Point(LocalDirection.X, LocalDirection.Y, LocalDirection.Z), Radius, bRepair);
-    if (Changed > 0) RebuildMesh(BodyMesh, BodyVolume);
+        Ap5Volume::Point(LocalDirection.X, LocalDirection.Y, LocalDirection.Z), Radius, bRepair, Changed);
+    if (!Changed.empty()) RefreshPieces(Changed);
     LastEditMilliseconds = (FPlatformTime::Seconds() - Started) * 1000;
-    UE_LOG(LogTemp, Display, TEXT("AP5_VOLUME_EDIT: mode=%s radius_cm=%.0f samples=%d cpu_ms=%.2f"),
-        bRepair ? TEXT("repair") : TEXT("drill"), Radius, Changed, LastEditMilliseconds);
-    return Changed;
+    UE_LOG(LogTemp, Display, TEXT("AP5_VOLUME_EDIT: mode=%s radius_cm=%.0f samples=%d pieces=%d cpu_ms=%.2f"),
+        bRepair ? TEXT("repair") : TEXT("drill"), Radius, Samples, static_cast<int32>(Changed.size()), LastEditMilliseconds);
+    return Samples;
 }
 
 int32 AAp5Monster::Cut(const FVector& PlanePoint, const FVector& PlaneNormal)
@@ -124,64 +127,42 @@ int32 AAp5Monster::Cut(const FVector& PlanePoint, const FVector& PlaneNormal)
     const double Started = FPlatformTime::Seconds();
     const FVector P = GetActorTransform().InverseTransformPosition(PlanePoint);
     const FVector N = GetActorTransform().InverseTransformVectorNoScale(PlaneNormal);
-    std::vector<Ap5Volume::Field> Pieces = BodyVolume.Cut(
-        Ap5Volume::Point(P.X, P.Y, P.Z), Ap5Volume::Point(N.X, N.Y, N.Z));
-    if (Pieces.size() < 2) return 0;
-    // 検証中の連続切断で破片を無制限に蓄積しない。拒否時は形状を変更しない。
-    if (Fragments.Num() + static_cast<int32>(Pieces.size()) - 1 > 32) return -1;
-    size_t Largest = 0;
-    int32 LargestCount = 0;
-    for (size_t I = 0; I < Pieces.size(); ++I)
-    {
-        const int32 Count = Pieces[I].MaterialCount();
-        if (Count > LargestCount) { LargestCount = Count; Largest = I; }
-    }
-    BodyVolume = std::move(Pieces[Largest]);
-    RebuildMesh(BodyMesh, BodyVolume);
-    for (size_t I = 0; I < Pieces.size(); ++I)
-    {
-        if (I == Largest) continue;
-        UDynamicMeshComponent* Piece = CreatePiece();
-        Ap5Volume::FallState State;
-        State.MinimumZ = RebuildMesh(Piece, Pieces[I]);
-        Fragments.Add(Piece);
-        Falling.Add(State);
-    }
-    bHasCut = true;
-    SetActorTickEnabled(true);
+    std::vector<int> Changed;
+    const int32 Added = Pieces.Cut(Ap5Volume::Point(P.X, P.Y, P.Z), Ap5Volume::Point(N.X, N.Y, N.Z), Changed);
+    if (Added > 0) RefreshPieces(Changed);
     LastEditMilliseconds = (FPlatformTime::Seconds() - Started) * 1000;
-    UE_LOG(LogTemp, Display, TEXT("AP5_CUT: detached=%d total=%d cpu_ms=%.2f"),
-        static_cast<int32>(Pieces.size()) - 1, Fragments.Num(), LastEditMilliseconds);
-    return static_cast<int32>(Pieces.size()) - 1;
+    UE_LOG(LogTemp, Display, TEXT("AP5_CUT: added=%d changed=%d total=%d cpu_ms=%.2f"),
+        Added, static_cast<int32>(Changed.size()), static_cast<int32>(Pieces.Items.size()), LastEditMilliseconds);
+    return Added;
 }
 
 void AAp5Monster::Tick(float DeltaSeconds)
 {
     Super::Tick(DeltaSeconds);
     bool bAnyFalling = false;
-    for (int32 I = 0; I < Fragments.Num(); ++I)
+    for (size_t I = 0; I < Pieces.Items.size(); ++I)
     {
-        Ap5Volume::FallState& State = Falling[I];
-        if (State.Landed) continue;
-        // 今回は水平な床（Z=0）への着地のみ。回転や破片同士の衝突は別の検証。
+        Ap5Volume::Piece& Piece = Pieces.Items[I];
+        Ap5Volume::FallState& State = Piece.Motion;
+        if (Piece.Fixed || State.Landed) continue;
+        // 本体と破片の区別ではなく、各塊の固定状態と落下状態だけを見る。
         if (State.Advance(DeltaSeconds, -GetActorLocation().Z))
         {
-            UE_LOG(LogTemp, Display, TEXT("AP5_FRAGMENT_LANDED: index=%d"), I);
+            UE_LOG(LogTemp, Display, TEXT("AP5_FRAGMENT_LANDED: index=%d"), static_cast<int32>(I));
         }
         else bAnyFalling = true;
-        Fragments[I]->SetRelativeLocation(FVector(0, 0, State.OffsetZ));
+        PieceMeshes[static_cast<int32>(I)]->SetRelativeLocation(FVector(0, 0, State.OffsetZ));
     }
     if (!bAnyFalling) SetActorTickEnabled(false);
 }
 
 void AAp5Monster::ResetShape()
 {
-    for (UDynamicMeshComponent* Piece : Fragments) Piece->DestroyComponent();
-    Fragments.Empty();
-    Falling.Empty();
-    bHasCut = false;
+    for (UDynamicMeshComponent* Mesh : PieceMeshes) Mesh->DestroyComponent();
+    PieceMeshes.Empty();
+    Pieces.Reset(InitialVolume);
+    PieceMeshes.Add(CreatePiece());
+    RebuildMesh(0);
     SetActorTickEnabled(false);
-    BodyVolume = InitialVolume;
-    RebuildMesh(BodyMesh, BodyVolume);
     UE_LOG(LogTemp, Display, TEXT("AP5_VOLUME_RESET"));
 }

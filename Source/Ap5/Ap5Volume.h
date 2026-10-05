@@ -130,7 +130,7 @@ public:
             Field Piece=*this;
             for (size_t I=0;I<Values.size();++I)
                 if (Values[I]<0 && Labels[I]!=C) Piece.Values[I]=-Values[I];
-            // 分離した領域を修復で再生させない。切断後の修復UIは今回無効にする。
+            // 切断時の形を修復の上限にして、別の破片の領域を再生させない。
             Piece.Original=Piece.Values;
             Result.push_back(std::move(Piece));
         }

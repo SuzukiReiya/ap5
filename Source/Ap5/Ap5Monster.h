@@ -2,7 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-#include "Ap5Volume.h"
+#include "Ap5Pieces.h"
 #include "Ap5Monster.generated.h"
 
 class UDynamicMeshComponent;
@@ -27,18 +27,15 @@ private:
     void AddPart(FName Name, const FVector& Center, const FVector& Radii,
         const FRotator& Rotation = FRotator::ZeroRotator);
     UDynamicMeshComponent* CreatePiece();
-    double RebuildMesh(UDynamicMeshComponent* Component, const Ap5Volume::Field& Volume);
+    void RebuildMesh(int32 Index);
+    void RefreshPieces(const std::vector<int>& Changed);
     std::vector<Ap5Volume::Ellipsoid> Shapes;
     Ap5Volume::Field InitialVolume;
-    Ap5Volume::Field BodyVolume;
-    TArray<Ap5Volume::FallState> Falling;
-    bool bHasCut = false;
+    Ap5Volume::PieceCollection Pieces;
 
     UPROPERTY()
     TObjectPtr<UMaterialInterface> GolemMaterial;
 
     UPROPERTY()
-    TObjectPtr<UDynamicMeshComponent> BodyMesh;
-    UPROPERTY()
-    TArray<TObjectPtr<UDynamicMeshComponent>> Fragments;
+    TArray<TObjectPtr<UDynamicMeshComponent>> PieceMeshes;
 };

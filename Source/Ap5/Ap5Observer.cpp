@@ -141,8 +141,8 @@ void AAp5Observer::PlayerTick(float DeltaTime)
                 const FVector Normal = FVector::CrossProduct(StartDirection, EndDirection).GetSafeNormal();
                 const int32 Detached = TestMonster->Cut(ObservationCamera->GetActorLocation(), Normal);
                 if (Detached < 0) EditStatus = TEXT("破片上限32個です。Backspaceで全リセットしてください。");
-                else if (Detached == 0) EditStatus = TEXT("切断なし：固定されている体を横切る線を引いてください。");
-                else EditStatus = FString::Printf(TEXT("切断：%d個が分離 / CPU処理 %.1f ms。最大の塊を固定し、残りを落下。"),
+                else if (Detached == 0) EditStatus = TEXT("切断なし：本体または破片を横切る線を引いてください。");
+                else EditStatus = FString::Printf(TEXT("切断：%d個増加 / CPU処理 %.1f ms。破片も続けて加工できます。"),
                     Detached, TestMonster->LastEditMilliseconds);
             }
         }
@@ -158,10 +158,9 @@ void AAp5Observer::PlayerTick(float DeltaTime)
         FVector Start, Direction;
         if (DeprojectMousePositionToWorld(Start, Direction))
         {
-            const int32 ChangedParts = TestMonster->ApplyBrush(Start, Direction, BrushRadius, bRepairMode);
-            EditStatus = ChangedParts < 0 ? TEXT("切断後の修復・再接続は未対応です。Backspaceで全リセットできます。")
-                : FString::Printf(TEXT("%s：更新 %d 格子点 / CPU処理 %.1f ms（描画完了までの時間は含みません）"),
-                bRepairMode ? TEXT("修復") : TEXT("穴あけ"), ChangedParts, TestMonster->LastEditMilliseconds);
+            const int32 ChangedSamples = TestMonster->ApplyBrush(Start, Direction, BrushRadius, bRepairMode);
+            EditStatus = FString::Printf(TEXT("%s：更新 %d 格子点 / CPU処理 %.1f ms（描画完了までの時間は含みません）"),
+                bRepairMode ? TEXT("修復") : TEXT("穴あけ"), ChangedSamples, TestMonster->LastEditMilliseconds);
         }
     }
 }
@@ -178,7 +177,7 @@ void AAp5ObserverHUD::DrawHUD()
     DrawText(TEXT("3：細い（12 cm）　4：標準（20 cm）　5：太い（30 cm）　Backspace：形状を全リセット"), FColor::White, 24, 44);
     DrawText(TEXT("右ドラッグ／矢印：回転　ホイール／PageUp・Down：ズーム　R：視点を戻す　Esc：終了"), FColor::White, 24, 68);
     DrawText(Observer->GetEditStatus(), FColor::Yellow, 24, 92);
-    DrawText(TEXT("穴あけ・修復：左クリック。切断：黄色い直線全体で奥まで切断。切断後の修復は未対応。"), FColor::White, 24, 116);
+    DrawText(TEXT("本体・破片とも加工可能。切断は黄色い直線全体で奥まで。修復は各塊の切断時の形まで。"), FColor::White, 24, 116);
     if (Observer->IsDrawingCut())
     {
         const FVector2D Start = Observer->GetCutStart();

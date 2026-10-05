@@ -1,5 +1,6 @@
 // 実際の体積演算をUEなしで検証する。描画・入力の確認はWindows側で別途行う。
 #include "../Source/Ap5/Ap5Volume.h"
+#include "../Source/Ap5/Ap5Pieces.h"
 #include <cassert>
 #include <iostream>
 #include <map>
@@ -135,4 +136,64 @@ int main()
     assert(Falling.Landed && Falling.OffsetZ==-100 && Falling.VelocityZ==0);
     assert(!Falling.Advance(2,0) && Falling.OffsetZ==-100);
     std::cout << "落下：重力による移動・長いフレームでの床貫通防止・着地後の停止を確認\n";
+
+    // ゲームで使う共通コレクションを直接検証。移動済みの破片も現在位置で加工する。
+    Ap5Volume::Ellipsoid TestShape;
+    TestShape.Center=Point(0,0,160); TestShape.Radii=Point(30,30,60);
+    Field Initial; Initial.InitializeUnion({TestShape});
+    Ap5Volume::PieceCollection Scene;
+    Scene.Reset(Initial);
+    std::vector<int> Changed;
+    assert(Scene.Cut(Point(0,0,0),Point(0,1,0),Changed)==1);
+    for (Ap5Volume::Piece& P : Scene.Items) P.RebuildSurface();
+    assert(Scene.Items.size()==2 && Scene.Items[0].Fixed && !Scene.Items[1].Fixed);
+    assert(Scene.Items[1].Motion.Advance(10,0));
+    const double LandedOffset=Scene.Items[1].Motion.OffsetZ;
+    const int BodyCount=Scene.Items[0].Volume.MaterialCount();
+    // 本体は高さ100cm以上に残り、着地した破片だけを高さ30cmで切る。
+    assert(Scene.Cut(Point(0,0,30),Point(0,0,1),Changed)==1);
+    assert(Scene.Items.size()==3 && Changed.size()==2);
+    assert(Scene.Items[0].Volume.MaterialCount()==BodyCount);
+    for (size_t I=1;I<Scene.Items.size();++I)
+    {
+        assert(!Scene.Items[I].Fixed && Scene.Items[I].Motion.OffsetZ==LandedOffset);
+        Scene.Items[I].RebuildSurface();
+        assert(!Scene.Items[I].Motion.Landed);
+        CheckSurface(Scene.Items[I].Volume);
+    }
+    // 上限で拒否した切断が一部だけ適用されることを防ぐ。
+    const int BeforeLimit=Scene.Items[1].Volume.MaterialCount();
+    assert(Scene.Cut(Point(0,0,45),Point(0,0,1),Changed,3)==-1);
+    assert(Changed.empty() && Scene.Items.size()==3 && Scene.Items[1].Volume.MaterialCount()==BeforeLimit);
+    for (size_t I=1;I<Scene.Items.size();++I) Scene.Items[I].Motion.Advance(10,0);
+    const Point Target(0,15,50);
+    const Point LocalTarget=Scene.Items[1].ToLocal(Target);
+    assert(Scene.Items[1].Volume.Sample(LocalTarget)<0);
+    Scene.Brush(Point(-200,15,50),Point(1,0,0),8,false,Changed);
+    assert(Scene.Items[1].Volume.Sample(LocalTarget)>0);
+    Scene.Brush(Point(-200,15,50),Point(1,0,0),12,true,Changed);
+    assert(Scene.Items[1].Volume.Sample(LocalTarget)<0);
+    // 修復しても、切断で別の塊になった側へ材料は戻らない。
+    assert(Scene.Items[1].Volume.Sample(Point(0,-15,160))>0);
+
+    // 空中の再切断でも、位置と落下速度を全ての子に引き継ぐ。
+    Scene.Reset(Initial);
+    Scene.Cut(Point(),Point(0,1,0),Changed);
+    for (Ap5Volume::Piece& P : Scene.Items) P.RebuildSurface();
+    assert(!Scene.Items[1].Motion.Advance(0.1,0));
+    const double AirOffset=Scene.Items[1].Motion.OffsetZ, AirVelocity=Scene.Items[1].Motion.VelocityZ;
+    assert(Scene.Cut(Point(0,0,160+AirOffset),Point(0,0,1),Changed)>0);
+    int MovingChildren=0;
+    for (Ap5Volume::Piece& P : Scene.Items)
+    {
+        if (P.Motion.OffsetZ==AirOffset)
+        {
+            assert(!P.Fixed && P.Motion.VelocityZ==AirVelocity);
+            ++MovingChildren;
+        }
+    }
+    assert(MovingChildren==2);
+    Scene.Reset(Initial);
+    assert(Scene.Items.size()==1 && Scene.Items[0].Fixed && Scene.Items[0].Motion.OffsetZ==0);
+    std::cout << "共通加工：着地後・落下中の再切断、位置と速度の継承、破片の穴あけ・修復、上限とリセットを確認\n";
 }
