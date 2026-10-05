@@ -1,4 +1,4 @@
-"""UE-independent consistency checks. These do not compile or render the game."""
+"""UEに依存しない整合性検証。ゲームのビルド・描画は検証しない。"""
 import json
 from pathlib import Path
 import runpy
@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class ProjectTests(unittest.TestCase):
     def test_project_and_plugins(self):
-        project = json.loads((ROOT / "Ap5.uproject").read_text())
+        project = json.loads((ROOT / "Ap5.uproject").read_text(encoding="utf-8-sig"))
         self.assertEqual(project["EngineAssociation"], "5.6")
         self.assertEqual(project["Modules"][0]["Name"], "Ap5")
         plugins = {p["Name"]: p for p in project["Plugins"]}
@@ -21,11 +21,11 @@ class ProjectTests(unittest.TestCase):
             self.assertEqual(plugins[name]["TargetAllowList"], ["Editor"])
 
     def test_generated_map_and_class_paths(self):
-        config = (ROOT / "Config/DefaultEngine.ini").read_text()
+        config = (ROOT / "Config/DefaultEngine.ini").read_text(encoding="utf-8-sig")
         self.assertIn("GameDefaultMap=/Game/Generated/Minimal", config)
         self.assertIn("GlobalDefaultGameMode=/Script/Ap5.Ap5GameMode", config)
-        self.assertIn("/Game/Generated/Minimal", (ROOT / "Scripts/CreateMap.py").read_text())
-        self.assertIn("/Game/Generated/Minimal", (ROOT / "Config/DefaultGame.ini").read_text())
+        self.assertIn("/Game/Generated/Minimal", (ROOT / "Scripts/CreateMap.py").read_text(encoding="utf-8-sig"))
+        self.assertIn("/Game/Generated/Minimal", (ROOT / "Config/DefaultGame.ini").read_text(encoding="utf-8-sig"))
 
     def test_expected_files(self):
         for relative in ("Source/Ap5.Target.cs", "Source/Ap5Editor.Target.cs",
@@ -34,11 +34,11 @@ class ProjectTests(unittest.TestCase):
             self.assertTrue((ROOT / relative).is_file(), relative)
 
     def test_native_tools_fail_closed(self):
-        common = (ROOT / "Scripts/Common.ps1").read_text()
+        common = (ROOT / "Scripts/Common.ps1").read_text(encoding="utf-8-sig")
         self.assertIn("$toolExitCode = $LASTEXITCODE", common)
         self.assertIn("if ($toolExitCode -ne 0)", common)
         for script in ("Setup.ps1", "BuildAndRun.ps1", "Package.ps1"):
-            self.assertIn("exit 1", (ROOT / "Scripts" / script).read_text())
+            self.assertIn("exit 1", (ROOT / "Scripts" / script).read_text(encoding="utf-8-sig"))
 
 
 class MapGenerationTests(unittest.TestCase):
