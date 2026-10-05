@@ -3,6 +3,16 @@ on: [push, pull_request, workflow_dispatch]
 permissions:
   contents: read
 jobs:
+  volume:
+    name: 体積演算の検証（UE不要）
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: C++をビルド
+        run: g++ -std=c++17 -O2 -Wall -Wextra -Werror Tests/test_volume.cpp -o /tmp/ap5-test-volume
+      - name: 貫通・修復・閉曲面を検証
+        run: /tmp/ap5-test-volume
   checks:
     runs-on: windows-latest
     timeout-minutes: 10

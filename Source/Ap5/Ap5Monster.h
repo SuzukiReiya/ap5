@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "Ap5Volume.h"
 #include "Ap5Monster.generated.h"
 
 class UDynamicMeshComponent;
@@ -15,10 +16,15 @@ class AP5_API AAp5Monster : public AActor
 public:
     AAp5Monster();
     virtual void BeginPlay() override;
+    int32 ApplyBrush(const FVector& Start, const FVector& Direction, float Radius, bool bRepair);
+    void ResetShape();
+    double LastEditMilliseconds = 0;
 
 private:
     void AddPart(FName Name, const FVector& Center, const FVector& Radii,
         const FRotator& Rotation = FRotator::ZeroRotator);
+    void RebuildPart(int32 PartIndex);
+    std::vector<Ap5Volume::Field> Volumes;
 
     UPROPERTY()
     TArray<TObjectPtr<UDynamicMeshComponent>> Parts;
