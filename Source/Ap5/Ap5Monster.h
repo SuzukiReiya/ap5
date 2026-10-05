@@ -6,6 +6,7 @@
 #include "Ap5Monster.generated.h"
 
 class UDynamicMeshComponent;
+class UMaterialInterface;
 
 // 各部位を独立した閉じたメッシュとして生成する、静止検証用モンスター。
 UCLASS()
@@ -25,6 +26,9 @@ private:
         const FRotator& Rotation = FRotator::ZeroRotator);
     void RebuildPart(int32 PartIndex);
     std::vector<Ap5Volume::Field> Volumes;
+
+    UPROPERTY()
+    TObjectPtr<UMaterialInterface> GolemMaterial;
 
     UPROPERTY()
     TArray<TObjectPtr<UDynamicMeshComponent>> Parts;

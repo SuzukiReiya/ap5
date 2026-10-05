@@ -7,10 +7,15 @@
 #include "DynamicMesh/DynamicMeshOverlay.h"
 #include "Materials/Material.h"
 #include "HAL/PlatformTime.h"
+#include "UObject/ConstructorHelpers.h"
 
 AAp5Monster::AAp5Monster()
 {
     RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("MonsterRoot"));
+    // 白い基本形状用マテリアルで、外皮と穴の内壁の陰影を見やすくする。
+    static ConstructorHelpers::FObjectFinder<UMaterialInterface> MaterialFinder(
+        TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
+    GolemMaterial = MaterialFinder.Object;
 }
 
 void AAp5Monster::BeginPlay()
@@ -46,7 +51,8 @@ void AAp5Monster::AddPart(FName Name, const FVector& Center,
     Part->SetRelativeRotation(Rotation);
     // 加工は体積を直接参照する。物理用の衝突形状は次の段階。
     Part->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-    Part->SetMaterial(0, UMaterial::GetDefaultMaterial(MD_Surface));
+    Part->SetMaterial(0, GolemMaterial != nullptr
+        ? GolemMaterial.Get() : UMaterial::GetDefaultMaterial(MD_Surface));
     Part->RegisterComponent();
     Parts.Add(Part);
     Ap5Volume::Field Volume;

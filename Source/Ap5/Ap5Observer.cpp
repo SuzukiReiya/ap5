@@ -71,8 +71,8 @@ void AAp5Observer::PlayerTick(float DeltaTime)
     {
         if (bDragging)
         {
-            Yaw -= (MouseX - PreviousMouse.X) * 0.35f;
-            Elevation += (MouseY - PreviousMouse.Y) * 0.25f;
+            Yaw += (MouseX - PreviousMouse.X) * 0.35f;
+            Elevation -= (MouseY - PreviousMouse.Y) * 0.25f;
         }
         PreviousMouse = FVector2D(MouseX, MouseY);
         bDragging = true;
@@ -83,10 +83,10 @@ void AAp5Observer::PlayerTick(float DeltaTime)
     }
     // マウス操作が難しい環境でも同じ確認ができるようにする。
     const float Step = 60.0f * FMath::Min(DeltaTime, 0.1f);
-    if (IsInputKeyDown(EKeys::Left)) Yaw -= Step;
-    if (IsInputKeyDown(EKeys::Right)) Yaw += Step;
-    if (IsInputKeyDown(EKeys::Up)) Elevation += Step;
-    if (IsInputKeyDown(EKeys::Down)) Elevation -= Step;
+    if (IsInputKeyDown(EKeys::Left)) Yaw += Step;
+    if (IsInputKeyDown(EKeys::Right)) Yaw -= Step;
+    if (IsInputKeyDown(EKeys::Up)) Elevation -= Step;
+    if (IsInputKeyDown(EKeys::Down)) Elevation += Step;
     if (WasInputKeyJustPressed(EKeys::MouseScrollUp)) Distance -= 50;
     if (WasInputKeyJustPressed(EKeys::MouseScrollDown)) Distance += 50;
     if (IsInputKeyDown(EKeys::PageUp)) Distance -= Step * 5;
