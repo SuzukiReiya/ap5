@@ -17,6 +17,10 @@ public:
     virtual void BeginPlay() override;
     virtual void PlayerTick(float DeltaTime) override;
     bool IsRepairMode() const { return bRepairMode; }
+    bool IsCutMode() const { return bCutMode; }
+    bool IsDrawingCut() const { return bDrawingCut; }
+    FVector2D GetCutStart() const { return CutStart; }
+    FVector2D GetCutEnd() const { return CutEnd; }
     float GetBrushRadius() const { return BrushRadius; }
     const FString& GetEditStatus() const { return EditStatus; }
 private:
@@ -27,6 +31,10 @@ private:
     UPROPERTY()
     TObjectPtr<AAp5Monster> TestMonster;
     bool bRepairMode = false;
+    bool bCutMode = false;
+    bool bDrawingCut = false;
+    FVector2D CutStart = FVector2D::ZeroVector;
+    FVector2D CutEnd = FVector2D::ZeroVector;
     float BrushRadius = 20.0f;
     FString EditStatus = TEXT("体にカーソルを合わせて左クリックしてください");
     float Yaw = 210.0f;

@@ -77,4 +77,62 @@ int main()
     assert(Volume.Sample(Point(0,0,0))<0);
     CheckSurface(Volume);
     std::cout << "体積演算：貫通・局所修復・外形制限・斜め加工・閉曲面・リセットの検証成功\n";
+    // 平面が外れた場合は無変更。水平・垂直・斜めの切断で両側が閉じる。
+    const int OriginalCount=Volume.MaterialCount();
+    assert(Volume.Cut(Point(500,0,0),Point(1,0,0)).empty());
+    assert(Volume.Cut(Point(),Point()).empty());
+    assert(Volume.MaterialCount()==OriginalCount);
+    const Point Directions[3]={Point(1,0,0),Point(0,0,1),Point(1,0.4,0.7)};
+    for (const Point& N : Directions)
+    {
+        const std::vector<Field> Pieces=Volume.Cut(Point(0,0,7),N);
+        assert(Pieces.size()==2);
+        int Total=0;
+        for (const Field& Piece : Pieces)
+        {
+            CheckSurface(Piece);
+            assert(Piece.Components().size()==1);
+            Total+=Piece.MaterialCount();
+        }
+        // 切りしろが格子間に収まる場合、負値の格子点数は変わらない。
+        assert(Total<=OriginalCount);
+    }
+    Volume.Brush(Point(-200,0,0),Point(1,0,0),20,false);
+    const std::vector<Field> HoledPieces=Volume.Cut(Point(0,0,3),Point(1,0.4,0.7));
+    assert(HoledPieces.size()==2);
+    for (const Field& Piece : HoledPieces) CheckSurface(Piece);
+
+    // 三つの重なった部位を一本の腕とみなし、中央を切ると先端がまとまって分離する。
+    std::vector<Ap5Volume::Ellipsoid> Shapes;
+    for (int I=0;I<3;++I)
+    {
+        Ap5Volume::Ellipsoid E;
+        E.Center=Point(0,I*35,0); E.Radii=Point(25,30,25); Shapes.push_back(E);
+    }
+    Field Arm; Arm.InitializeUnion(Shapes);
+    assert(Arm.Components().size()==1);
+    CheckSurface(Arm);
+    const std::vector<Field> ArmPieces=Arm.Cut(Point(0,20,0),Point(0,1,0));
+    assert(ArmPieces.size()==2);
+    bool TipConnected=false;
+    for (const Field& Piece : ArmPieces)
+    {
+        CheckSurface(Piece);
+        if (Piece.Sample(Point(0,35,0))<0 && Piece.Sample(Point(0,70,0))<0) TipConnected=true;
+    }
+    assert(TipConnected);
+    // 同じ側にある離れた物体を一つの破片として扱わない。
+    Shapes[2].Center=Point(0,150,0);
+    Arm.InitializeUnion(Shapes);
+    assert(Arm.Components().size()==2);
+    std::cout << "切断：水平・垂直・斜め・穴のある断面・連結判定の検証成功\n";
+    Ap5Volume::FallState Falling;
+    Falling.MinimumZ=100;
+    assert(!Falling.Advance(0,0));
+    assert(!Falling.Advance(0.1,0));
+    assert(std::abs(Falling.OffsetZ+4.9)<1e-8);
+    assert(Falling.Advance(2,0));
+    assert(Falling.Landed && Falling.OffsetZ==-100 && Falling.VelocityZ==0);
+    assert(!Falling.Advance(2,0) && Falling.OffsetZ==-100);
+    std::cout << "落下：重力による移動・長いフレームでの床貫通防止・着地後の停止を確認\n";
 }

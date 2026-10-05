@@ -8,6 +8,27 @@
 
 namespace Ap5Volume
 {
+// 水平床に対する落下だけを扱う。速度・距離はcm基準。
+struct FallState
+{
+    double MinimumZ=0, OffsetZ=0, VelocityZ=0;
+    bool Landed=false;
+    bool Advance(double DeltaSeconds, double FloorZ)
+    {
+        if (Landed || DeltaSeconds<=0) return false;
+        OffsetZ+=VelocityZ*DeltaSeconds-490*DeltaSeconds*DeltaSeconds;
+        VelocityZ-=980*DeltaSeconds;
+        if (OffsetZ+MinimumZ<=FloorZ)
+        {
+            OffsetZ=FloorZ-MinimumZ;
+            VelocityZ=0;
+            Landed=true;
+            return true;
+        }
+        return false;
+    }
+};
+
 struct Point
 {
     double X, Y, Z;
@@ -27,9 +48,123 @@ struct Triangle
     Point Normals[3];
 };
 
+struct Ellipsoid
+{
+    Point Center, Radii;
+    Point AxisX = Point(1,0,0), AxisY = Point(0,1,0), AxisZ = Point(0,0,1);
+    double Evaluate(const Point& P) const
+    {
+        const Point D = P-Center;
+        return (Point(D.Dot(AxisX)/Radii.X,D.Dot(AxisY)/Radii.Y,D.Dot(AxisZ)/Radii.Z).Length()-1)
+            *std::min(Radii.X,std::min(Radii.Y,Radii.Z));
+    }
+};
+
 class Field
 {
 public:
+    // 部位を同じ格子上で合成し、肩から手までのつながりも判定できるようにする。
+    void InitializeUnion(const std::vector<Ellipsoid>& Shapes, double InSpacing=5)
+    {
+        if (Shapes.empty()) { *this=Field(); return; }
+        Point Low(1e9,1e9,1e9), High(-1e9,-1e9,-1e9);
+        for (const Ellipsoid& E : Shapes)
+        {
+            const Point Extent(
+                std::abs(E.AxisX.X)*E.Radii.X+std::abs(E.AxisY.X)*E.Radii.Y+std::abs(E.AxisZ.X)*E.Radii.Z,
+                std::abs(E.AxisX.Y)*E.Radii.X+std::abs(E.AxisY.Y)*E.Radii.Y+std::abs(E.AxisZ.Y)*E.Radii.Z,
+                std::abs(E.AxisX.Z)*E.Radii.X+std::abs(E.AxisY.Z)*E.Radii.Y+std::abs(E.AxisZ.Z)*E.Radii.Z);
+            Low=Point(std::min(Low.X,E.Center.X-Extent.X),std::min(Low.Y,E.Center.Y-Extent.Y),std::min(Low.Z,E.Center.Z-Extent.Z));
+            High=Point(std::max(High.X,E.Center.X+Extent.X),std::max(High.Y,E.Center.Y+Extent.Y),std::max(High.Z,E.Center.Z+Extent.Z));
+        }
+        Spacing=InSpacing;
+        Origin=Low-Point(Spacing,Spacing,Spacing);
+        NX=static_cast<int>(std::ceil((High.X-Low.X)/Spacing))+3;
+        NY=static_cast<int>(std::ceil((High.Y-Low.Y)/Spacing))+3;
+        NZ=static_cast<int>(std::ceil((High.Z-Low.Z)/Spacing))+3;
+        Values.resize(NX*NY*NZ);
+        for (int Z=0;Z<NZ;++Z) for (int Y=0;Y<NY;++Y) for (int X=0;X<NX;++X)
+        {
+            double Value=1e9;
+            for (const Ellipsoid& E : Shapes) Value=std::min(Value,E.Evaluate(Position(X,Y,Z)));
+            Values[Index(X,Y,Z)]=Value;
+        }
+        Original=Values;
+    }
+
+    int MaterialCount() const
+    {
+        int Count=0;
+        for (double V : Values) if (V<0) ++Count;
+        return Count;
+    }
+
+    // 表面生成に使う四面体の辺に沿って探索する。斜めの細いつながりも維持する。
+    std::vector<Field> Components() const
+    {
+        std::vector<int> Labels(Values.size(),-1), Queue;
+        int ComponentCount=0;
+        const int Steps[7][3]={{1,0,0},{0,1,0},{0,0,1},{1,1,0},{1,0,1},{0,1,1},{1,1,1}};
+        for (int Seed=0;Seed<static_cast<int>(Values.size());++Seed)
+        {
+            if (Values[Seed]>=0 || Labels[Seed]>=0) continue;
+            Queue.clear(); Queue.push_back(Seed); Labels[Seed]=ComponentCount;
+            for (size_t Head=0;Head<Queue.size();++Head)
+            {
+                const int I=Queue[Head], X=I%NX, Y=(I/NX)%NY, Z=I/(NX*NY);
+                for (int S=0;S<7;++S) for (int Sign=-1;Sign<=1;Sign+=2)
+                {
+                    const int XX=X+Steps[S][0]*Sign, YY=Y+Steps[S][1]*Sign, ZZ=Z+Steps[S][2]*Sign;
+                    if (XX<0 || XX>=NX || YY<0 || YY>=NY || ZZ<0 || ZZ>=NZ) continue;
+                    const int J=Index(XX,YY,ZZ);
+                    if (Values[J]<0 && Labels[J]<0) { Labels[J]=ComponentCount; Queue.push_back(J); }
+                }
+            }
+            ++ComponentCount;
+            // 極端に細かい加工で全格子のコピーが無制限に増えるのを防ぐ。
+            if (ComponentCount>32) return {};
+        }
+        std::vector<Field> Result;
+        for (int C=0;C<ComponentCount;++C)
+        {
+            Field Piece=*this;
+            for (size_t I=0;I<Values.size();++I)
+                if (Values[I]<0 && Labels[I]!=C) Piece.Values[I]=-Values[I];
+            // 分離した領域を修復で再生させない。切断後の修復UIは今回無効にする。
+            Piece.Original=Piece.Values;
+            Result.push_back(std::move(Piece));
+        }
+        return Result;
+    }
+
+    // 薄い切りしろを持つ平面で両側を閉じ、さらに連結成分ごとに分離する。
+    // 平面が材料を両側に分けないときは空配列を返し、元の体積は変えない。
+    std::vector<Field> Cut(const Point& PlanePoint, const Point& PlaneNormal) const
+    {
+        if (PlaneNormal.Length()<1e-12) return {};
+        const Point N=PlaneNormal.Unit();
+        const double HalfGap=1.5;
+        Field Sides[2]={*this,*this};
+        int Counts[2]={0,0};
+        for (int Z=0;Z<NZ;++Z) for (int Y=0;Y<NY;++Y) for (int X=0;X<NX;++X)
+        {
+            const int I=Index(X,Y,Z);
+            const double D=(Position(X,Y,Z)-PlanePoint).Dot(N);
+            Sides[0].Values[I]=std::max(Values[I],D+HalfGap);
+            Sides[1].Values[I]=std::max(Values[I],-D+HalfGap);
+            for (int S=0;S<2;++S) if (Sides[S].Values[I]<0) ++Counts[S];
+        }
+        if (Counts[0]==0 || Counts[1]==0) return {};
+        std::vector<Field> Result;
+        for (int S=0;S<2;++S)
+        {
+            std::vector<Field> Pieces=Sides[S].Components();
+            if (Pieces.empty()) return {};
+            for (Field& Piece : Pieces) Result.push_back(std::move(Piece));
+        }
+        return Result;
+    }
+
     void Initialize(const Point& Radii, double InSpacing = 5)
     {
         Spacing = InSpacing;

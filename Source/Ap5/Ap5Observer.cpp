@@ -108,8 +108,9 @@ void AAp5Observer::PlayerTick(float DeltaTime)
             break;
         }
     }
-    if (WasInputKeyJustPressed(EKeys::One)) bRepairMode = false;
-    if (WasInputKeyJustPressed(EKeys::Two)) bRepairMode = true;
+    if (WasInputKeyJustPressed(EKeys::One)) { bRepairMode = false; bCutMode = false; bDrawingCut = false; }
+    if (WasInputKeyJustPressed(EKeys::Two)) { bRepairMode = true; bCutMode = false; bDrawingCut = false; }
+    if (WasInputKeyJustPressed(EKeys::Six)) { bCutMode = true; bDrawingCut = false; }
     if (WasInputKeyJustPressed(EKeys::Three)) BrushRadius = 12;
     if (WasInputKeyJustPressed(EKeys::Four)) BrushRadius = 20;
     if (WasInputKeyJustPressed(EKeys::Five)) BrushRadius = 30;
@@ -117,17 +118,49 @@ void AAp5Observer::PlayerTick(float DeltaTime)
     if (WasInputKeyJustPressed(EKeys::BackSpace))
     {
         TestMonster->ResetShape();
+        bDrawingCut = false;
         EditStatus = TEXT("全形状を初期状態に戻しました（修復操作とは別）");
     }
     // 案内の上と視点ドラッグ中は加工しない。長押しによる連続加工も行わない。
     const bool bOverHUD = bMouseAvailable && MouseX >= 12 && MouseX <= 1012 && MouseY >= 12 && MouseY <= 146;
+    if (bDragging || !bMouseAvailable) bDrawingCut = false;
+    if (bDrawingCut)
+    {
+        CutEnd = FVector2D(MouseX, MouseY);
+        if (WasInputKeyJustReleased(EKeys::LeftMouseButton))
+        {
+            bDrawingCut = false;
+            FVector StartOrigin, StartDirection, EndOrigin, EndDirection;
+            if ((CutEnd - CutStart).Size() < 12 || bOverHUD)
+            {
+                EditStatus = TEXT("切断を取り消しました。案内の外で12ピクセル以上ドラッグしてください。");
+            }
+            else if (DeprojectScreenPositionToWorld(CutStart.X, CutStart.Y, StartOrigin, StartDirection)
+                && DeprojectScreenPositionToWorld(CutEnd.X, CutEnd.Y, EndOrigin, EndDirection))
+            {
+                const FVector Normal = FVector::CrossProduct(StartDirection, EndDirection).GetSafeNormal();
+                const int32 Detached = TestMonster->Cut(ObservationCamera->GetActorLocation(), Normal);
+                if (Detached < 0) EditStatus = TEXT("破片上限32個です。Backspaceで全リセットしてください。");
+                else if (Detached == 0) EditStatus = TEXT("切断なし：固定されている体を横切る線を引いてください。");
+                else EditStatus = FString::Printf(TEXT("切断：%d個が分離 / CPU処理 %.1f ms。最大の塊を固定し、残りを落下。"),
+                    Detached, TestMonster->LastEditMilliseconds);
+            }
+        }
+    }
     if (WasInputKeyJustPressed(EKeys::LeftMouseButton) && bMouseAvailable && !bDragging && !bOverHUD)
     {
+        if (bCutMode)
+        {
+            CutStart = CutEnd = FVector2D(MouseX, MouseY);
+            bDrawingCut = true;
+            return;
+        }
         FVector Start, Direction;
         if (DeprojectMousePositionToWorld(Start, Direction))
         {
             const int32 ChangedParts = TestMonster->ApplyBrush(Start, Direction, BrushRadius, bRepairMode);
-            EditStatus = FString::Printf(TEXT("%s：更新 %d 部位 / CPU処理 %.1f ms（描画完了までの時間は含みません）"),
+            EditStatus = ChangedParts < 0 ? TEXT("切断後の修復・再接続は未対応です。Backspaceで全リセットできます。")
+                : FString::Printf(TEXT("%s：更新 %d 格子点 / CPU処理 %.1f ms（描画完了までの時間は含みません）"),
                 bRepairMode ? TEXT("修復") : TEXT("穴あけ"), ChangedParts, TestMonster->LastEditMilliseconds);
         }
     }
@@ -139,10 +172,20 @@ void AAp5ObserverHUD::DrawHUD()
     DrawRect(FLinearColor(0, 0, 0, 0.75f), 12, 12, 1000, 134);
     const AAp5Observer* Observer = Cast<AAp5Observer>(GetOwningPlayerController());
     if (Observer == nullptr) return;
-    DrawText(FString::Printf(TEXT("体積加工：%s　半径 %.0f cm　1：穴あけ　2：修復　左クリック：実行"),
-        Observer->IsRepairMode() ? TEXT("修復") : TEXT("穴あけ"), Observer->GetBrushRadius()), FColor::White, 24, 20);
+    DrawText(FString::Printf(TEXT("体積加工：%s　半径 %.0f cm　1：穴あけ　2：修復　6：切断（左ドラッグ）"),
+        Observer->IsCutMode() ? TEXT("切断") : (Observer->IsRepairMode() ? TEXT("修復") : TEXT("穴あけ")),
+        Observer->GetBrushRadius()), FColor::White, 24, 20);
     DrawText(TEXT("3：細い（12 cm）　4：標準（20 cm）　5：太い（30 cm）　Backspace：形状を全リセット"), FColor::White, 24, 44);
     DrawText(TEXT("右ドラッグ／矢印：回転　ホイール／PageUp・Down：ズーム　R：視点を戻す　Esc：終了"), FColor::White, 24, 68);
     DrawText(Observer->GetEditStatus(), FColor::Yellow, 24, 92);
-    DrawText(TEXT("視線方向に貫通加工。修復は指定範囲だけ元の体の内側へ材料を戻します。"), FColor::White, 24, 116);
+    DrawText(TEXT("穴あけ・修復：左クリック。切断：黄色い直線全体で奥まで切断。切断後の修復は未対応。"), FColor::White, 24, 116);
+    if (Observer->IsDrawingCut())
+    {
+        const FVector2D Start = Observer->GetCutStart();
+        const FVector2D End = Observer->GetCutEnd();
+        const FVector2D Direction = (End - Start).GetSafeNormal();
+        const FVector2D A = Start - Direction * 4000;
+        const FVector2D B = End + Direction * 4000;
+        DrawLine(A.X, A.Y, B.X, B.Y, FLinearColor::Yellow, 2.0f);
+    }
 }
