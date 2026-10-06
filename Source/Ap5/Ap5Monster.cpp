@@ -147,8 +147,8 @@ void AAp5Monster::RebuildMesh(int32 Index)
             Component->WakeAllRigidBodies();
         }
     }
-    UE_LOG(LogTemp, Display, TEXT("AP5_COLLISION: index=%d boxes=%d simulated=%d"),
-        Index, static_cast<int32>(Boxes.size()), Component->IsSimulatingPhysics() ? 1 : 0);
+    UE_LOG(LogTemp, Display, TEXT("AP5_COLLISION: index=%d boxes=%d fixed=%d simulated=%d"),
+        Index, static_cast<int32>(Boxes.size()), State.Fixed ? 1 : 0, Component->IsSimulatingPhysics() ? 1 : 0);
 }
 
 void AAp5Monster::RefreshPieces(const std::vector<int>& Changed)

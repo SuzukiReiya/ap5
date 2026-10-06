@@ -142,7 +142,7 @@ int main()
     TestShape.Center=Point(0,0,160); TestShape.Radii=Point(30,30,60);
     Field Initial; Initial.InitializeUnion({TestShape});
     Ap5Volume::PieceCollection Scene;
-    Scene.Reset(Initial);
+    Scene.Reset(Initial,{Point(0,-15,120)});
     std::vector<int> Changed;
     assert(Scene.Cut(Point(0,0,0),Point(0,1,0),Changed)==1);
     for (Ap5Volume::Piece& P : Scene.Items) P.RebuildSurface();
@@ -177,7 +177,7 @@ int main()
     assert(Scene.Items[1].Volume.Sample(Point(0,-15,160))>0);
 
     // 空中の再切断でも、位置と落下速度を全ての子に引き継ぐ。
-    Scene.Reset(Initial);
+    Scene.Reset(Initial,{Point(0,-15,120)});
     Scene.Cut(Point(),Point(0,1,0),Changed);
     for (Ap5Volume::Piece& P : Scene.Items) P.RebuildSurface();
     assert(!Scene.Items[1].Motion.Advance(0.1,0));
@@ -193,7 +193,7 @@ int main()
         }
     }
     assert(MovingChildren==2);
-    Scene.Reset(Initial);
+    Scene.Reset(Initial,{Point(0,-15,120)});
     assert(Scene.Items.size()==1 && Scene.Items[0].Fixed && Scene.Items[0].Motion.OffsetZ==0);
     std::cout << "共通加工：着地後・落下中の再切断、位置と速度の継承、破片の穴あけ・修復、上限とリセットを確認\n";
     // 一発では表面だけをへこませ、同じ射線の繰り返しで貫通する。
@@ -258,20 +258,21 @@ int main()
     Neck.Center=Point(0,0,100); Neck.Radii=Point(10,35,10);
     Field Connected; Connected.InitializeUnion({Left,Neck,Right});
     assert(Connected.Components().size()==1);
-    Scene.Reset(Connected);
+    Scene.Reset(Connected,{Point(0,-40,80)});
     const Point NeckStart(-200,0,100);
     Scene.Brush(NeckStart,ShotDirection,4,false,Changed);
     assert(Scene.Items.size()==1);
     Scene.Brush(NeckStart,ShotDirection,14,false,Changed);
     assert(Scene.Items.size()==2 && Changed.size()==2);
-    assert(Scene.Items[0].Fixed && !Scene.Items[1].Fixed);
+    assert(Scene.Items[0].Fixed != Scene.Items[1].Fixed);
     for (Ap5Volume::Piece& P : Scene.Items)
     {
         assert(P.Volume.Components().size()==1);
         P.RebuildSurface();
         CheckSurface(P.Volume);
     }
-    assert(Scene.Items[1].Motion.Advance(10,0));
+    const size_t DetachedIndex=Scene.Items[0].Fixed ? 1 : 0;
+    assert(Scene.Items[DetachedIndex].Motion.Advance(10,0));
     // 修復で分離時の隙間が埋まって再接続されることはない。
     Scene.Brush(NeckStart,ShotDirection,30,true,Changed);
     assert(Scene.Items[0].Volume.Sample(Point(0,0,100))>0);
@@ -417,5 +418,39 @@ int main()
     const std::vector<Ap5Volume::CollisionBox> ThinBoxes=Thin.CollisionBoxes();
     assert(ThinBoxes.size()==1 && Thin.Sample(ThinBoxes[0].Center)<0);
     std::cout << "物理用データ：回転後の加工・姿勢と速度の継承・穴を保持する衝突箱・薄片と空形状を確認\n";
+
+    // 大きい上半身も、足元の支持点から離れたら固定を解除する。
+    Scene.Reset(Initial);
+    assert(Scene.Cut(Point(0,0,125),Point(0,0,1),Changed)==1);
+    int Supported=0, Free=0;
+    for (const Ap5Volume::Piece& P : Scene.Items)
+    {
+        if (P.Volume.Sample(Point(0,0,180))<0)
+        {
+            assert(!P.Fixed); ++Free;
+        }
+        if (P.Volume.Sample(Point(0,0,110))<0)
+        {
+            assert(P.Fixed); ++Supported;
+        }
+    }
+    assert(Supported==1 && Free==1);
+    assert(!Scene.Items[0].Fixed); // 最大の塊を固定する旧挙動を再発させない。
+    // 左右それぞれに足元を残す縦分割では、両側とも支持される。
+    Scene.Reset(Connected);
+    assert(Scene.Cut(Point(0,0,100),Point(0,1,0),Changed)==1);
+    assert(Scene.Items.size()==2 && Scene.Items[0].Fixed && Scene.Items[1].Fixed);
+    // 分離せずに支持点だけを削り落とした場合も固定解除する。
+    Scene.Reset(Initial);
+    const std::vector<Point> Feet=Initial.LowestMaterialPoints();
+    assert(!Feet.empty());
+    const Point SupportRay(-200,0,Feet[0].Z);
+    Scene.Brush(SupportRay,Point(1,0,0),25,false,Changed);
+    assert(Scene.Items.size()==1 && !Scene.Items[0].Fixed);
+    Scene.Brush(SupportRay,Point(1,0,0),40,true,Changed);
+    assert(!Scene.Items[0].Fixed); // 修復や着地で固定へ戻さない。
+    Scene.Reset(Initial);
+    assert(Scene.Items.size()==1 && Scene.Items[0].Fixed);
+    std::cout << "支持判定：浮いた最大塊の固定解除・両足の独立支持・支持点消去・修復後も自由状態を確認\n";
 
 }

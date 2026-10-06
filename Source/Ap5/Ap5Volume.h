@@ -104,6 +104,19 @@ public:
         return Count;
     }
 
+    // 初期形状の最下段の材料を支持点にする。今回のモデルでは足裏付近に相当する。
+    std::vector<Point> LowestMaterialPoints() const
+    {
+        std::vector<Point> Points;
+        for (int Z=0;Z<NZ;++Z)
+        {
+            for (int Y=0;Y<NY;++Y) for (int X=0;X<NX;++X)
+                if (Values[Index(X,Y,Z)]<0) Points.push_back(Position(X,Y,Z));
+            if (!Points.empty()) break;
+        }
+        return Points;
+    }
+
     // 全頂点が材料の内側にあるセルだけを箱にし、空洞を埋めずに衝突形状を近似する。
     // X、Y、Zの順で隣接セルをまとめ、物理形状数を減らす。
     std::vector<CollisionBox> CollisionBoxes() const

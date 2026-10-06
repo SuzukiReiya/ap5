@@ -39,12 +39,13 @@ class PieceCollection
 public:
     std::vector<Piece> Items;
 
-    void Reset(const Field& Initial)
+    void Reset(const Field& Initial,const std::vector<Point>& Supports = {})
     {
         Items.clear();
+        SupportPoints=Supports.empty() ? Initial.LowestMaterialPoints() : Supports;
         Piece Body;
         Body.Volume=Initial;
-        Body.Fixed=true;
+        Body.Fixed=HasSupport(Initial);
         Items.push_back(std::move(Body));
     }
 
@@ -117,6 +118,15 @@ public:
     }
 
 private:
+    std::vector<Point> SupportPoints;
+
+    bool HasSupport(const Field& Volume) const
+    {
+        for (const Point& P : SupportPoints)
+            if (Volume.Sample(P)<0) return true;
+        return false;
+    }
+
     static bool PrepareEdit(Field& Edited,bool Repair,std::vector<Field>& Parts)
     {
         if (!Repair)
@@ -146,6 +156,7 @@ private:
             const int Count=Parts[J].MaterialCount();
             if (Count>LargestCount) { LargestCount=Count; Largest=J; }
         }
+        const bool ParentFixed=Items[Index].Fixed;
         Piece ParentState;
         ParentState.Motion=Items[Index].Motion;
         ParentState.Translation=Items[Index].Translation;
@@ -155,14 +166,16 @@ private:
         ParentState.OriginVelocity=Items[Index].OriginVelocity;
         ParentState.AngularVelocity=Items[Index].AngularVelocity;
         Items[Index].Volume=std::move(Parts[Largest]);
+        Items[Index].Fixed=ParentFixed && HasSupport(Items[Index].Volume);
         Items[Index].Motion.Landed=false;
         Changed.push_back(static_cast<int>(Index));
-        // 固定された塊を分けたときだけ、最大の子が固定を引き継ぐ。
+        // 大きさによらず、初期の支持点を残した子だけ固定する。自由になった塊は再固定しない。
         for (size_t J=0;J<Parts.size();++J)
         {
             if (J==Largest) continue;
             Piece Child=ParentState;
             Child.Volume=std::move(Parts[J]);
+            Child.Fixed=ParentFixed && HasSupport(Child.Volume);
             Child.Motion.Landed=false;
             Changed.push_back(static_cast<int>(Items.size()));
             Items.push_back(std::move(Child));
