@@ -555,11 +555,11 @@ int main()
     MovingArm.Translation=JointPivot-RotatedPivot;
     MovingArm.OriginVelocity=Point(15,0,0);
     MovingArm.AngularVelocity=Point(0,1,0);
-    const Point LocalShot(-200,115,100), LocalShotAxis(1,0,0), LocalTarget(0,115,100);
+    const Point LocalShot(-200,115,100), LocalShotAxis(1,0,0), ArmLocalTarget(0,115,100);
     const Point MovingShot=MovingArm.ToWorld(LocalShot);
     const Point MovingShotAxis=MovingArm.ToWorldVector(LocalShotAxis);
     assert(Scene.Brush(MovingShot,MovingShotAxis,8,false,Changed)>0);
-    assert(Scene.Items.size()==2 && Scene.Items[Driven].Volume.Sample(LocalTarget)>0);
+    assert(Scene.Items.size()==2 && Scene.Items[Driven].Volume.Sample(ArmLocalTarget)>0);
     const Point MovingCutPoint=Scene.Items[Driven].ToWorld(Point(0,95,120));
     const Point MovingCutNormal=Scene.Items[Driven].ToWorldVector(Point(0,1,0));
     assert(Scene.Cut(MovingCutPoint,MovingCutNormal,Changed)==1);
