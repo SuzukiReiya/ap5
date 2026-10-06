@@ -347,4 +347,75 @@ int main()
     assert(Scene.Items[0].Volume.MaterialCount()==ConnectedCount);
     std::cout << "自動分離：接続維持・穴あけと弾痕での分離・落下・状態継承・修復制限・上限拒否を確認\n";
 
+    // 回転・平行移動した物体への加工は、元の物体へ同じ局所操作をした結果と一致する。
+    for (int Mode=0;Mode<4;++Mode)
+    {
+        Ap5Volume::PieceCollection Reference, Rotated;
+        Reference.Reset(Connected); Rotated.Reset(Connected);
+        Ap5Volume::Piece& Pose=Rotated.Items[0];
+        Pose.Fixed=false;
+        Pose.Translation=Point(200,-80,50);
+        Pose.AxisX=Point(0,0,1); Pose.AxisY=Point(1,0,0); Pose.AxisZ=Point(0,1,0);
+        Pose.OriginVelocity=Point(10,20,-30); Pose.AngularVelocity=Point(0,0,2);
+        const Point WorldStart=Pose.ToWorld(NeckStart), WorldDirection=Pose.ToWorldVector(ShotDirection);
+        const Point WorldPlane=Pose.ToWorld(Point(0,0,100)), WorldNormal=Pose.ToWorldVector(Point(0,1,0));
+        assert((Pose.ToLocal(WorldStart)-NeckStart).Length()<1e-9);
+        assert((Pose.VelocityAt(Pose.ToWorld(Point())+Point(3,0,0))-Point(10,26,-30)).Length()<1e-9);
+        std::vector<int> ReferenceChanged;
+        if (Mode==0)
+        {
+            Reference.Brush(NeckStart,ShotDirection,14,false,ReferenceChanged);
+            Rotated.Brush(WorldStart,WorldDirection,14,false,Changed);
+        }
+        else if (Mode==1)
+        {
+            Reference.Impact(NeckStart,ShotDirection,20,8,ReferenceChanged);
+            Rotated.Impact(WorldStart,WorldDirection,20,8,Changed);
+        }
+        else if (Mode==2)
+        {
+            Reference.Cut(Point(0,0,100),Point(0,1,0),ReferenceChanged);
+            Rotated.Cut(WorldPlane,WorldNormal,Changed);
+        }
+        else
+        {
+            Reference.Impact(NeckStart,ShotDirection,20,8,ReferenceChanged);
+            Rotated.Impact(WorldStart,WorldDirection,20,8,Changed);
+            Reference.Brush(NeckStart,ShotDirection,25,true,ReferenceChanged);
+            Rotated.Brush(WorldStart,WorldDirection,25,true,Changed);
+        }
+        assert(Reference.Items.size()==Rotated.Items.size());
+        for (size_t I=0;I<Rotated.Items.size();++I)
+        {
+            const Ap5Volume::Piece& P=Rotated.Items[I];
+            assert(P.Volume.MaterialCount()==Reference.Items[I].Volume.MaterialCount());
+            assert((P.Translation-Point(200,-80,50)).Length()<1e-9);
+            assert((P.AxisX-Point(0,0,1)).Length()<1e-9);
+            assert((P.AngularVelocity-Point(0,0,2)).Length()<1e-9 && !P.Fixed);
+            assert((P.OriginVelocity-Point(10,20,-30)).Length()<1e-9);
+        }
+    }
+    // 衝突箱は材料内部のセルをまとめたもの。貫通穴の中心をふさがない。
+    Field CollisionVolume; CollisionVolume.Initialize(Point(40,43,47));
+    const size_t BeforeBoxes=CollisionVolume.CollisionBoxes().size();
+    assert(BeforeBoxes>0);
+    CollisionVolume.Brush(Point(-200,0,0),Point(1,0,0),15,false);
+    const std::vector<Ap5Volume::CollisionBox> Boxes=CollisionVolume.CollisionBoxes();
+    assert(!Boxes.empty());
+    double BoxVolume=0;
+    for (const Ap5Volume::CollisionBox& B : Boxes)
+    {
+        BoxVolume+=B.Size.X*B.Size.Y*B.Size.Z;
+        assert(std::abs(B.Center.Y)>B.Size.Y*0.5 || std::abs(B.Center.Z)>B.Size.Z*0.5);
+        for (int Z=-1;Z<=1;Z+=2) for (int Y=-1;Y<=1;Y+=2) for (int X=-1;X<=1;X+=2)
+            assert(CollisionVolume.Sample(B.Center+Point(X*B.Size.X,Y*B.Size.Y,Z*B.Size.Z)*0.5)<0);
+    }
+    assert(BoxVolume>0);
+    CollisionVolume.Brush(Point(-200,0,0),Point(1,0,0),200,false);
+    assert(CollisionVolume.CollisionBoxes().empty());
+    Field Thin; Thin.Initialize(Point(3,20,20),5);
+    const std::vector<Ap5Volume::CollisionBox> ThinBoxes=Thin.CollisionBoxes();
+    assert(ThinBoxes.size()==1 && Thin.Sample(ThinBoxes[0].Center)<0);
+    std::cout << "物理用データ：回転後の加工・姿勢と速度の継承・穴を保持する衝突箱・薄片と空形状を確認\n";
+
 }

@@ -30,6 +30,7 @@ private:
         const FRotator& Rotation = FRotator::ZeroRotator);
     UDynamicMeshComponent* CreatePiece();
     void RebuildMesh(int32 Index);
+    void SyncPhysicsState();
     void RefreshPieces(const std::vector<int>& Changed);
     std::vector<Ap5Volume::Ellipsoid> Shapes;
     Ap5Volume::Field InitialVolume;

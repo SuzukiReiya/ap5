@@ -7,12 +7,21 @@
 #include "DynamicMesh/DynamicMeshOverlay.h"
 #include "Materials/Material.h"
 #include "HAL/PlatformTime.h"
+#include "PhysicsEngine/AggregateGeom.h"
+#include "Math/RotationMatrix.h"
 #include "UObject/ConstructorHelpers.h"
+
+namespace
+{
+Ap5Volume::Point VolumePoint(const FVector& P) { return Ap5Volume::Point(P.X,P.Y,P.Z); }
+FVector EnginePoint(const Ap5Volume::Point& P) { return FVector(P.X,P.Y,P.Z); }
+}
 
 AAp5Monster::AAp5Monster()
 {
     PrimaryActorTick.bCanEverTick = true;
     PrimaryActorTick.bStartWithTickEnabled = false;
+    PrimaryActorTick.TickGroup = TG_PostPhysics;
     RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("MonsterRoot"));
     // 白い基本形状用マテリアルで、外皮と穴の内壁の陰影を見やすくする。
     static ConstructorHelpers::FObjectFinder<UMaterialInterface> MaterialFinder(
@@ -67,6 +76,12 @@ UDynamicMeshComponent* AAp5Monster::CreatePiece()
     Piece->SetupAttachment(RootComponent);
     Piece->SetMobility(EComponentMobility::Movable);
     Piece->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    Piece->bUseAsyncCooking = false;
+    Piece->SetComplexAsSimpleCollisionEnabled(false, false);
+    Piece->CollisionType = CTF_UseSimpleAsComplex;
+    Piece->SetDeferredCollisionUpdatesEnabled(true, false);
+    Piece->SetLinearDamping(0.15f);
+    Piece->SetAngularDamping(0.5f);
     Piece->SetMaterial(0, GolemMaterial != nullptr
         ? GolemMaterial.Get() : UMaterial::GetDefaultMaterial(MD_Surface));
     Piece->RegisterComponent();
@@ -75,7 +90,11 @@ UDynamicMeshComponent* AAp5Monster::CreatePiece()
 
 void AAp5Monster::RebuildMesh(int32 Index)
 {
-    const std::vector<Ap5Volume::Triangle> Surface = Pieces.Items[Index].RebuildSurface();
+    Ap5Volume::Piece& State = Pieces.Items[Index];
+    UDynamicMeshComponent* Component = PieceMeshes[Index];
+    Component->SetSimulatePhysics(false);
+    Component->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    const std::vector<Ap5Volume::Triangle> Surface = State.RebuildSurface();
     UE::Geometry::FDynamicMesh3 Mesh;
     Mesh.EnableAttributes();
     for (const Ap5Volume::Triangle& Face : Surface)
@@ -95,8 +114,41 @@ void AAp5Monster::RebuildMesh(int32 Index)
         Mesh.Attributes()->PrimaryNormals()->SetTriangle(Triangle,
             UE::Geometry::FIndex3i(Normals[0], Normals[1], Normals[2]));
     }
-    PieceMeshes[Index]->SetMesh(MoveTemp(Mesh));
-    PieceMeshes[Index]->SetRelativeLocation(FVector(0, 0, Pieces.Items[Index].Motion.OffsetZ));
+    Component->SetMesh(MoveTemp(Mesh));
+    const FQuat Rotation = FRotationMatrix::MakeFromXY(EnginePoint(State.AxisX), EnginePoint(State.AxisY)).ToQuat();
+    const FTransform LocalTransform(Rotation, EnginePoint(State.ToWorld(Ap5Volume::Point())));
+    // 物理開始時に親から外れるため、再加工時はワールド変換を明示的に復元する。
+    Component->SetWorldTransform(LocalTransform * GetActorTransform(), false, nullptr, ETeleportType::TeleportPhysics);
+    FKAggregateGeom Collision;
+    const std::vector<Ap5Volume::CollisionBox> Boxes = State.Volume.CollisionBoxes();
+    for (const Ap5Volume::CollisionBox& Box : Boxes)
+    {
+        FKBoxElem Element;
+        Element.Center = EnginePoint(Box.Center);
+        Element.X = static_cast<float>(Box.Size.X);
+        Element.Y = static_cast<float>(Box.Size.Y);
+        Element.Z = static_cast<float>(Box.Size.Z);
+        Collision.BoxElems.Add(Element);
+    }
+    Component->SetSimpleCollisionShapes(Collision, false);
+    Component->UpdateCollision(false);
+    if (!Boxes.empty())
+    {
+        Component->SetCollisionObjectType(State.Fixed ? ECC_WorldStatic : ECC_PhysicsBody);
+        Component->SetCollisionResponseToAllChannels(ECR_Block);
+        Component->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+        Component->SetUseCCD(true, NAME_None);
+        Component->SetSimulatePhysics(!State.Fixed);
+        if (!State.Fixed)
+        {
+            const Ap5Volume::Point Center = VolumePoint(GetActorTransform().InverseTransformPosition(Component->GetCenterOfMass()));
+            Component->SetPhysicsLinearVelocity(GetActorTransform().TransformVectorNoScale(EnginePoint(State.VelocityAt(Center))));
+            Component->SetPhysicsAngularVelocityInRadians(GetActorTransform().TransformVectorNoScale(EnginePoint(State.AngularVelocity)));
+            Component->WakeAllRigidBodies();
+        }
+    }
+    UE_LOG(LogTemp, Display, TEXT("AP5_COLLISION: index=%d boxes=%d simulated=%d"),
+        Index, static_cast<int32>(Boxes.size()), Component->IsSimulatingPhysics() ? 1 : 0);
 }
 
 void AAp5Monster::RefreshPieces(const std::vector<int>& Changed)
@@ -109,6 +161,7 @@ void AAp5Monster::RefreshPieces(const std::vector<int>& Changed)
 int32 AAp5Monster::ApplyBrush(const FVector& Start, const FVector& Direction, float Radius, bool bRepair)
 {
     const double Started = FPlatformTime::Seconds();
+    SyncPhysicsState();
     const FVector LocalStart = GetActorTransform().InverseTransformPosition(Start);
     const FVector LocalDirection = GetActorTransform().InverseTransformVectorNoScale(Direction);
     const int32 Before = static_cast<int32>(Pieces.Items.size());
@@ -127,6 +180,7 @@ int32 AAp5Monster::ApplyBrush(const FVector& Start, const FVector& Direction, fl
 int32 AAp5Monster::ApplyImpact(const FVector& Start, const FVector& Direction, float Radius)
 {
     const double Started = FPlatformTime::Seconds();
+    SyncPhysicsState();
     const FVector LocalStart = GetActorTransform().InverseTransformPosition(Start);
     const FVector LocalDirection = GetActorTransform().InverseTransformVectorNoScale(Direction);
     const int32 Before = static_cast<int32>(Pieces.Items.size());
@@ -145,6 +199,7 @@ int32 AAp5Monster::ApplyImpact(const FVector& Start, const FVector& Direction, f
 int32 AAp5Monster::Cut(const FVector& PlanePoint, const FVector& PlaneNormal)
 {
     const double Started = FPlatformTime::Seconds();
+    SyncPhysicsState();
     const FVector P = GetActorTransform().InverseTransformPosition(PlanePoint);
     const FVector N = GetActorTransform().InverseTransformVectorNoScale(PlaneNormal);
     std::vector<int> Changed;
@@ -156,24 +211,36 @@ int32 AAp5Monster::Cut(const FVector& PlanePoint, const FVector& PlaneNormal)
     return Added;
 }
 
+void AAp5Monster::SyncPhysicsState()
+{
+    for (int32 I = 0; I < PieceMeshes.Num(); ++I)
+    {
+        UDynamicMeshComponent* Component = PieceMeshes[I];
+        Ap5Volume::Piece& State = Pieces.Items[I];
+        const FTransform Relative = Component->GetComponentTransform().GetRelativeTransform(GetActorTransform());
+        State.Translation = VolumePoint(Relative.GetLocation());
+        State.AxisX = VolumePoint(Relative.TransformVectorNoScale(FVector::ForwardVector));
+        State.AxisY = VolumePoint(Relative.TransformVectorNoScale(FVector::RightVector));
+        State.AxisZ = VolumePoint(Relative.TransformVectorNoScale(FVector::UpVector));
+        State.Motion.OffsetZ = 0;
+        if (Component->IsSimulatingPhysics())
+        {
+            State.OriginVelocity = VolumePoint(GetActorTransform().InverseTransformVectorNoScale(
+                Component->GetPhysicsLinearVelocityAtPoint(Component->GetComponentLocation())));
+            State.AngularVelocity = VolumePoint(GetActorTransform().InverseTransformVectorNoScale(
+                Component->GetPhysicsAngularVelocityInRadians()));
+            const bool bSleeping = !Component->RigidBodyIsAwake();
+            if (bSleeping && !State.Motion.Landed)
+                UE_LOG(LogTemp, Display, TEXT("AP5_FRAGMENT_SLEEP: index=%d"), I);
+            State.Motion.Landed = bSleeping;
+        }
+    }
+}
+
 void AAp5Monster::Tick(float DeltaSeconds)
 {
     Super::Tick(DeltaSeconds);
-    bool bAnyFalling = false;
-    for (size_t I = 0; I < Pieces.Items.size(); ++I)
-    {
-        Ap5Volume::Piece& Piece = Pieces.Items[I];
-        Ap5Volume::FallState& State = Piece.Motion;
-        if (Piece.Fixed || State.Landed) continue;
-        // 本体と破片の区別ではなく、各塊の固定状態と落下状態だけを見る。
-        if (State.Advance(DeltaSeconds, -GetActorLocation().Z))
-        {
-            UE_LOG(LogTemp, Display, TEXT("AP5_FRAGMENT_LANDED: index=%d"), static_cast<int32>(I));
-        }
-        else bAnyFalling = true;
-        PieceMeshes[static_cast<int32>(I)]->SetRelativeLocation(FVector(0, 0, State.OffsetZ));
-    }
-    if (!bAnyFalling) SetActorTickEnabled(false);
+    SyncPhysicsState();
 }
 
 void AAp5Monster::ResetShape()

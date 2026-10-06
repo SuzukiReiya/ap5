@@ -11,7 +11,15 @@ struct Piece
     FallState Motion;
     bool Fixed=false;
 
-    Point ToLocal(const Point& World) const { return World-Point(0,0,Motion.OffsetZ); }
+    Point Translation;
+    Point AxisX=Point(1,0,0), AxisY=Point(0,1,0), AxisZ=Point(0,0,1);
+    // 親の原点における並進速度と角速度。UEとの受け渡しはモンスター座標系。
+    Point OriginVelocity, AngularVelocity;
+    Point ToLocalVector(const Point& V) const { return Point(V.Dot(AxisX),V.Dot(AxisY),V.Dot(AxisZ)); }
+    Point ToWorldVector(const Point& V) const { return AxisX*V.X+AxisY*V.Y+AxisZ*V.Z; }
+    Point ToLocal(const Point& World) const { return ToLocalVector(World-Translation-Point(0,0,Motion.OffsetZ)); }
+    Point ToWorld(const Point& Local) const { return ToWorldVector(Local)+Translation+Point(0,0,Motion.OffsetZ); }
+    Point VelocityAt(const Point& World) const { return OriginVelocity+AngularVelocity.Cross(World-ToWorld(Point())); }
 
     std::vector<Triangle> RebuildSurface()
     {
@@ -50,7 +58,7 @@ public:
         for (size_t I=0;I<Before;++I)
         {
             Field Edited=Items[I].Volume;
-            const int Count=Edited.Brush(Items[I].ToLocal(Start),Direction,Radius,Repair);
+            const int Count=Edited.Brush(Items[I].ToLocal(Start),Items[I].ToLocalVector(Direction),Radius,Repair);
             if (Count==0) continue;
             if (!PrepareEdit(Edited,Repair,Plans[I])) return -1;
             Added+=static_cast<int>(Plans[I].size())-1;
@@ -72,7 +80,7 @@ public:
         for (size_t I=0;I<Items.size();++I)
         {
             double Distance=0;
-            if (Items[I].Volume.Trace(Items[I].ToLocal(Start),Axis,Nearest,Distance))
+            if (Items[I].Volume.Trace(Items[I].ToLocal(Start),Items[I].ToLocalVector(Axis),Nearest,Distance))
             {
                 Nearest=Distance;
                 Target=static_cast<int>(I);
@@ -80,7 +88,7 @@ public:
         }
         if (Target<0) return 0;
         Field Edited=Items[Target].Volume;
-        const int Count=Edited.Dent(Items[Target].ToLocal(Start+Axis*Nearest),Axis,Radius,Depth);
+        const int Count=Edited.Dent(Items[Target].ToLocal(Start+Axis*Nearest),Items[Target].ToLocalVector(Axis),Radius,Depth);
         if (Count==0) return 0;
         std::vector<Field> Parts;
         if (!PrepareEdit(Edited,false,Parts)) return -1;
@@ -98,7 +106,7 @@ public:
         int Added=0;
         for (size_t I=0;I<Before;++I)
         {
-            Plans[I]=Items[I].Volume.Cut(Items[I].ToLocal(PlanePoint),Normal);
+            Plans[I]=Items[I].Volume.Cut(Items[I].ToLocal(PlanePoint),Items[I].ToLocalVector(Normal));
             if (Plans[I].size()<2) continue;
             Added+=static_cast<int>(Plans[I].size())-1;
             if (static_cast<int>(Before)+Added>MaximumPieces) return -1;
@@ -138,7 +146,14 @@ private:
             const int Count=Parts[J].MaterialCount();
             if (Count>LargestCount) { LargestCount=Count; Largest=J; }
         }
-        const FallState ParentMotion=Items[Index].Motion;
+        Piece ParentState;
+        ParentState.Motion=Items[Index].Motion;
+        ParentState.Translation=Items[Index].Translation;
+        ParentState.AxisX=Items[Index].AxisX;
+        ParentState.AxisY=Items[Index].AxisY;
+        ParentState.AxisZ=Items[Index].AxisZ;
+        ParentState.OriginVelocity=Items[Index].OriginVelocity;
+        ParentState.AngularVelocity=Items[Index].AngularVelocity;
         Items[Index].Volume=std::move(Parts[Largest]);
         Items[Index].Motion.Landed=false;
         Changed.push_back(static_cast<int>(Index));
@@ -146,9 +161,8 @@ private:
         for (size_t J=0;J<Parts.size();++J)
         {
             if (J==Largest) continue;
-            Piece Child;
+            Piece Child=ParentState;
             Child.Volume=std::move(Parts[J]);
-            Child.Motion=ParentMotion;
             Child.Motion.Landed=false;
             Changed.push_back(static_cast<int>(Items.size()));
             Items.push_back(std::move(Child));

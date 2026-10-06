@@ -100,9 +100,11 @@ function Build-Ap5Editor {
 function Initialize-Ap5Map {
     param([string]$EngineRoot)
     $mapFile = Join-Path $script:ProjectRoot 'Content\Generated\Minimal.umap'
-    if (Test-Path $mapFile) { return }
+    $backgroundFile = Join-Path $script:ProjectRoot 'Content\Generated\M_Background.uasset'
+    if ((Test-Path $mapFile) -and (Test-Path $backgroundFile)) { return }
     Invoke-Ap5Tool -FilePath (Join-Path $EngineRoot 'Engine\Binaries\Win64\UnrealEditor-Cmd.exe') `
         -Arguments @($script:ProjectFile, '-run=pythonscript', "-script=$(Join-Path $PSScriptRoot 'CreateMap.py')", '-unattended', '-nop4', '-nullrhi', '-stdout', '-FullStdOutLogOutput') `
         -LogName 'create-map.log'
     if (-not (Test-Path $mapFile)) { throw 'UE did not generate Minimal.umap. See .local/logs/create-map.log.' }
+    if (-not (Test-Path $backgroundFile)) { throw 'UE did not generate M_Background.uasset. See .local/logs/create-map.log.' }
 }

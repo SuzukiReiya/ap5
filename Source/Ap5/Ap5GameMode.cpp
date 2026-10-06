@@ -8,6 +8,7 @@
 #include "Engine/StaticMesh.h"
 #include "Engine/StaticMeshActor.h"
 #include "Engine/World.h"
+#include "Materials/MaterialInterface.h"
 #include "UObject/ConstructorHelpers.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogAp5, Log, All);
@@ -31,6 +32,22 @@ void AAp5GameMode::StartPlay()
         UE_LOG(LogAp5, Error, TEXT("Cannot create sample: world or basic shapes missing."));
         return;
     }
+
+    // 両面・非ライティングの大きな箱の内側で、空の部分だけを単色にする。
+    UMaterialInterface* BackgroundMaterial = LoadObject<UMaterialInterface>(nullptr,
+        TEXT("/Game/Generated/M_Background.M_Background"));
+    AStaticMeshActor* Background = World->SpawnActor<AStaticMeshActor>();
+    if (Background != nullptr && BackgroundMaterial != nullptr)
+    {
+        UStaticMeshComponent* BackgroundComponent = Background->GetStaticMeshComponent();
+        BackgroundComponent->SetMobility(EComponentMobility::Movable);
+        BackgroundComponent->SetStaticMesh(FloorMesh);
+        BackgroundComponent->SetWorldScale3D(FVector(200.0));
+        BackgroundComponent->SetMaterial(0, BackgroundMaterial);
+        BackgroundComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+        BackgroundComponent->SetCastShadow(false);
+    }
+    else UE_LOG(LogAp5, Error, TEXT("背景を生成できません。BuildAndRun.ps1で材質生成を確認してください。"));
 
     // UEの長さ単位はcm。薄い立方体で床の衝突判定を確保する。
     AStaticMeshActor* Floor = World->SpawnActor<AStaticMeshActor>(

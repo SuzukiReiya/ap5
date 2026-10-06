@@ -48,6 +48,11 @@ struct Triangle
     Point Normals[3];
 };
 
+struct CollisionBox
+{
+    Point Center, Size;
+};
+
 struct Ellipsoid
 {
     Point Center, Radii;
@@ -97,6 +102,72 @@ public:
         int Count=0;
         for (double V : Values) if (V<0) ++Count;
         return Count;
+    }
+
+    // 全頂点が材料の内側にあるセルだけを箱にし、空洞を埋めずに衝突形状を近似する。
+    // X、Y、Zの順で隣接セルをまとめ、物理形状数を減らす。
+    std::vector<CollisionBox> CollisionBoxes() const
+    {
+        std::vector<CollisionBox> Boxes;
+        std::vector<unsigned char> Solid(Values.size(),0);
+        for (int Z=0;Z<NZ-1;++Z) for (int Y=0;Y<NY-1;++Y) for (int X=0;X<NX-1;++X)
+        {
+            bool Inside=true;
+            for (int DZ=0;DZ<2;++DZ) for (int DY=0;DY<2;++DY) for (int DX=0;DX<2;++DX)
+                if (Values[Index(X+DX,Y+DY,Z+DZ)]>=0) Inside=false;
+            if (Inside) Solid[Index(X,Y,Z)]=1;
+        }
+        for (int Z=0;Z<NZ-1;++Z) for (int Y=0;Y<NY-1;++Y) for (int X=0;X<NX-1;++X)
+        {
+            if (!Solid[Index(X,Y,Z)]) continue;
+            int EndX=X+1, EndY=Y+1, EndZ=Z+1;
+            while (EndX<NX-1 && Solid[Index(EndX,Y,Z)]) ++EndX;
+            while (EndY<NY-1)
+            {
+                bool Full=true;
+                for (int XX=X;XX<EndX;++XX) if (!Solid[Index(XX,EndY,Z)]) Full=false;
+                if (!Full) break;
+                ++EndY;
+            }
+            while (EndZ<NZ-1)
+            {
+                bool Full=true;
+                for (int YY=Y;YY<EndY;++YY) for (int XX=X;XX<EndX;++XX)
+                    if (!Solid[Index(XX,YY,EndZ)]) Full=false;
+                if (!Full) break;
+                ++EndZ;
+            }
+            CollisionBox Box;
+            Box.Size=Point(EndX-X,EndY-Y,EndZ-Z)*Spacing;
+            Box.Center=Position(X,Y,Z)+Box.Size*0.5;
+            Boxes.push_back(Box);
+            for (int ZZ=Z;ZZ<EndZ;++ZZ) for (int YY=Y;YY<EndY;++YY) for (int XX=X;XX<EndX;++XX)
+                Solid[Index(XX,YY,ZZ)]=0;
+        }
+        // 完全なセルがない薄片は、材料が最も厚い格子点の小箱で最低限支える。
+        if (Boxes.empty())
+        {
+            int Deepest=-1;
+            for (int I=0;I<static_cast<int>(Values.size());++I)
+                if (Values[I]<0 && (Deepest<0 || Values[I]<Values[Deepest])) Deepest=I;
+            if (Deepest>=0)
+            {
+                CollisionBox Box;
+                Box.Center=Position(Deepest%NX,(Deepest/NX)%NY,Deepest/(NX*NY));
+                double Half=Spacing*0.25;
+                for (int Trial=0;Trial<20;++Trial)
+                {
+                    bool Inside=true;
+                    for (int Z=-1;Z<=1;Z+=2) for (int Y=-1;Y<=1;Y+=2) for (int X=-1;X<=1;X+=2)
+                        if (Sample(Box.Center+Point(X,Y,Z)*Half)>=0) Inside=false;
+                    if (Inside) break;
+                    Half*=0.5;
+                }
+                Box.Size=Point(2*Half,2*Half,2*Half);
+                Boxes.push_back(Box);
+            }
+        }
+        return Boxes;
     }
 
     // 表面生成に使う四面体の辺に沿って探索する。斜めの細いつながりも維持する。

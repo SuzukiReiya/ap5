@@ -42,10 +42,19 @@ class ProjectTests(unittest.TestCase):
 
 
 class MapGenerationTests(unittest.TestCase):
-    def run_script(self, exists=False, world=object(), save=True):
+    def run_script(self, exists=False, world=object(), save=True, background_exists=True):
         unreal = types.ModuleType("unreal")
         unreal.EditorAssetLibrary = Mock()
-        unreal.EditorAssetLibrary.does_asset_exist.return_value = exists
+        unreal.EditorAssetLibrary.does_asset_exist.side_effect = (
+            lambda path: background_exists if path.endswith("M_Background") else exists)
+        unreal.AssetToolsHelpers = Mock()
+        unreal.Material = Mock()
+        unreal.MaterialFactoryNew = Mock()
+        unreal.MaterialShadingModel = Mock()
+        unreal.MaterialExpressionConstant3Vector = Mock()
+        unreal.MaterialEditingLibrary = Mock()
+        unreal.MaterialProperty = Mock()
+        unreal.LinearColor = Mock()
         unreal.EditorLoadingAndSavingUtils = Mock()
         unreal.EditorLoadingAndSavingUtils.new_blank_map.return_value = world
         unreal.EditorLoadingAndSavingUtils.save_map.return_value = save
@@ -64,6 +73,13 @@ class MapGenerationTests(unittest.TestCase):
         unreal = self.run_script(exists=True)
         unreal.EditorLoadingAndSavingUtils.new_blank_map.assert_not_called()
         unreal.EditorLoadingAndSavingUtils.save_map.assert_not_called()
+
+    def test_existing_map_gets_missing_background(self):
+        unreal = self.run_script(exists=True, background_exists=False)
+        unreal.EditorLoadingAndSavingUtils.new_blank_map.assert_not_called()
+        unreal.AssetToolsHelpers.get_asset_tools().create_asset.assert_called_once()
+        unreal.MaterialEditingLibrary.connect_material_property.assert_called_once()
+        unreal.EditorAssetLibrary.save_loaded_asset.assert_called_once()
 
     def test_world_failure(self):
         with self.assertRaisesRegex(RuntimeError, "create"):
