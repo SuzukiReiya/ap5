@@ -108,14 +108,21 @@ void AAp5Observer::PlayerTick(float DeltaTime)
             break;
         }
     }
-    if (WasInputKeyJustPressed(EKeys::One)) { bImpactMode = false; bRepairMode = false; bCutMode = false; bDrawingCut = false; }
-    if (WasInputKeyJustPressed(EKeys::Two)) { bImpactMode = false; bRepairMode = true; bCutMode = false; bDrawingCut = false; }
-    if (WasInputKeyJustPressed(EKeys::Six)) { bImpactMode = false; bCutMode = true; bDrawingCut = false; }
-    if (WasInputKeyJustPressed(EKeys::Seven)) { bImpactMode = true; bRepairMode = false; bCutMode = false; bDrawingCut = false; }
+    if (WasInputKeyJustPressed(EKeys::One)) { bJoinMode = false; bImpactMode = false; bRepairMode = false; bCutMode = false; bDrawingCut = false; }
+    if (WasInputKeyJustPressed(EKeys::Two)) { bJoinMode = false; bImpactMode = false; bRepairMode = true; bCutMode = false; bDrawingCut = false; }
+    if (WasInputKeyJustPressed(EKeys::Six)) { bJoinMode = false; bImpactMode = false; bCutMode = true; bDrawingCut = false; }
+    if (WasInputKeyJustPressed(EKeys::Seven)) { bJoinMode = false; bImpactMode = true; bRepairMode = false; bCutMode = false; bDrawingCut = false; }
+    if (WasInputKeyJustPressed(EKeys::Eight))
+    {
+        bJoinMode = true; bImpactMode = false; bRepairMode = false; bCutMode = false; bDrawingCut = false;
+        if (IsValid(TestMonster)) TestMonster->ClearJoinSelection();
+        EditStatus = TEXT("接合：戻す破片をクリックし、次に接合先をクリックしてください。");
+    }
     if (WasInputKeyJustPressed(EKeys::Three)) BrushRadius = 12;
     if (WasInputKeyJustPressed(EKeys::Four)) BrushRadius = 20;
     if (WasInputKeyJustPressed(EKeys::Five)) BrushRadius = 30;
     if (!IsValid(TestMonster)) return;
+    if (!bJoinMode) TestMonster->ClearJoinSelection();
     if (WasInputKeyJustPressed(EKeys::BackSpace))
     {
         TestMonster->ResetShape();
@@ -159,6 +166,11 @@ void AAp5Observer::PlayerTick(float DeltaTime)
         FVector Start, Direction;
         if (DeprojectMousePositionToWorld(Start, Direction))
         {
+            if (bJoinMode)
+            {
+                EditStatus = TestMonster->ApplyJoin(Start, Direction);
+                return;
+            }
             const int32 ChangedSamples = bImpactMode ? TestMonster->ApplyImpact(Start, Direction, BrushRadius)
                 : TestMonster->ApplyBrush(Start, Direction, BrushRadius, bRepairMode);
             if (ChangedSamples < 0) EditStatus = TEXT("分離上限のため加工しませんでした。Backspaceで全リセットできます。");
@@ -168,19 +180,33 @@ void AAp5Observer::PlayerTick(float DeltaTime)
     }
 }
 
+bool AAp5Observer::GetJoinMarker(FVector2D& ScreenPosition) const
+{
+    FVector Location;
+    return bJoinMode && IsValid(TestMonster) && TestMonster->GetJoinSelectionLocation(Location)
+        && ProjectWorldLocationToScreen(Location, ScreenPosition);
+}
+
 void AAp5ObserverHUD::DrawHUD()
 {
     Super::DrawHUD();
     DrawRect(FLinearColor(0, 0, 0, 0.75f), 12, 12, 1000, 134);
     const AAp5Observer* Observer = Cast<AAp5Observer>(GetOwningPlayerController());
     if (Observer == nullptr) return;
-    DrawText(FString::Printf(TEXT("%s　半径 %.0f cm　7：弾痕　1：貫通穴　2：修復　6：切断（左ドラッグ）"),
-        Observer->IsImpactMode() ? TEXT("弾痕") : (Observer->IsCutMode() ? TEXT("切断") : (Observer->IsRepairMode() ? TEXT("修復") : TEXT("穴あけ"))),
+    DrawText(FString::Printf(TEXT("%s　半径 %.0f cm　7：弾痕　1：貫通穴　2：修復　6：切断　8：接合"),
+        Observer->IsJoinMode() ? TEXT("接合") : (Observer->IsImpactMode() ? TEXT("弾痕") : (Observer->IsCutMode() ? TEXT("切断") : (Observer->IsRepairMode() ? TEXT("修復") : TEXT("穴あけ")))),
         Observer->GetBrushRadius()), FColor::White, 24, 20);
     DrawText(TEXT("3：細い（12 cm）　4：標準（20 cm）　5：太い（30 cm）　Backspace：形状を全リセット"), FColor::White, 24, 44);
     DrawText(TEXT("右ドラッグ／矢印：回転　ホイール／PageUp・Down：ズーム　R：視点を戻す　Esc：終了"), FColor::White, 24, 68);
     DrawText(Observer->GetEditStatus(), FColor::Yellow, 24, 92);
-    DrawText(TEXT("つながりを削り切ると分離・落下。本体・破片とも加工可能。修復は直近の分離時の形まで。"), FColor::White, 24, 116);
+    DrawText(TEXT("つながりを削り切ると分離・落下。本体・破片とも加工可能。修復は直近の分離・接合時の形まで。"), FColor::White, 24, 116);
+    FVector2D JoinMarker;
+    if (Observer->GetJoinMarker(JoinMarker))
+    {
+        DrawLine(JoinMarker.X - 10, JoinMarker.Y, JoinMarker.X + 10, JoinMarker.Y, FLinearColor::Yellow, 2);
+        DrawLine(JoinMarker.X, JoinMarker.Y - 10, JoinMarker.X, JoinMarker.Y + 10, FLinearColor::Yellow, 2);
+        DrawText(TEXT("接合元"), FColor::Yellow, JoinMarker.X + 12, JoinMarker.Y);
+    }
     if (Observer->IsDrawingCut())
     {
         const FVector2D Start = Observer->GetCutStart();

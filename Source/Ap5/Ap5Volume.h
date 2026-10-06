@@ -272,6 +272,36 @@ public:
         Values = Original;
     }
 
+    // 同じ生成時座標の二つの塊を接合する。補うのは分離直前に存在し、
+    // 現在の両方の材料に隣接する格子点だけ。広い欠損は再生しない。
+    bool JoinAtSeam(const Field& Other,const Field& BeforeSplit,Field& Result) const
+    {
+        if (!SameGrid(Other) || !SameGrid(BeforeSplit) || MaterialCount()==0 || Other.MaterialCount()==0) return false;
+        Field Merged=*this;
+        for (size_t I=0;I<Values.size();++I) Merged.Values[I]=std::min(Values[I],Other.Values[I]);
+        for (int Z=0;Z<NZ;++Z) for (int Y=0;Y<NY;++Y) for (int X=0;X<NX;++X)
+        {
+            const int I=Index(X,Y,Z);
+            if (Merged.Values[I]<0 || BeforeSplit.Values[I]>=0) continue;
+            bool NearThis=false, NearOther=false;
+            for (int DZ=-1;DZ<=1;++DZ) for (int DY=-1;DY<=1;++DY) for (int DX=-1;DX<=1;++DX)
+            {
+                const int XX=X+DX, YY=Y+DY, ZZ=Z+DZ;
+                if (XX<0 || XX>=NX || YY<0 || YY>=NY || ZZ<0 || ZZ>=NZ) continue;
+                const int J=Index(XX,YY,ZZ);
+                NearThis=NearThis || Values[J]<0;
+                NearOther=NearOther || Other.Values[J]<0;
+            }
+            if (NearThis && NearOther) Merged.Values[I]=BeforeSplit.Values[I];
+        }
+        bool Exceeded=false;
+        const std::vector<Field> Parts=Merged.Components(&Exceeded);
+        if (Exceeded || Parts.size()!=1) return false;
+        Merged.Original=Merged.Values;
+        Result=std::move(Merged);
+        return true;
+    }
+
     void Reset() { Values = Original; }
 
     // 格子内の材料に最初に当たる距離。距離場は厳密な距離ではないため定間隔で探索する。
@@ -417,6 +447,12 @@ public:
     }
 
 private:
+    bool SameGrid(const Field& Other) const
+    {
+        return NX==Other.NX && NY==Other.NY && NZ==Other.NZ
+            && Spacing==Other.Spacing && (Origin-Other.Origin).Length()<1e-9;
+    }
+
     int NX=0, NY=0, NZ=0;
     double Spacing=5;
     Point Origin;

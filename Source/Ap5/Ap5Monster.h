@@ -22,6 +22,9 @@ public:
     int32 ApplyImpact(const FVector& Start, const FVector& Direction, float Radius);
     int32 Cut(const FVector& PlanePoint, const FVector& PlaneNormal);
     void ResetShape();
+    FString ApplyJoin(const FVector& Start, const FVector& Direction);
+    void ClearJoinSelection() { SelectedJoinPiece = INDEX_NONE; }
+    bool GetJoinSelectionLocation(FVector& Location) const;
     double LastEditMilliseconds = 0;
     int32 LastSeparatedPieces = 0;
 
@@ -32,6 +35,7 @@ private:
     void RebuildMesh(int32 Index);
     void SyncPhysicsState();
     void RefreshPieces(const std::vector<int>& Changed);
+    int32 SelectedJoinPiece = INDEX_NONE;
     std::vector<Ap5Volume::Ellipsoid> Shapes;
     Ap5Volume::Field InitialVolume;
     Ap5Volume::PieceCollection Pieces;

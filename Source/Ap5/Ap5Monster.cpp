@@ -211,6 +211,56 @@ int32 AAp5Monster::Cut(const FVector& PlanePoint, const FVector& PlaneNormal)
     return Added;
 }
 
+bool AAp5Monster::GetJoinSelectionLocation(FVector& Location) const
+{
+    if (!PieceMeshes.IsValidIndex(SelectedJoinPiece)) return false;
+    Location = PieceMeshes[SelectedJoinPiece]->Bounds.Origin;
+    return true;
+}
+
+FString AAp5Monster::ApplyJoin(const FVector& Start, const FVector& Direction)
+{
+    SyncPhysicsState();
+    double Distance = 0;
+    const int32 Target = Pieces.Pick(
+        VolumePoint(GetActorTransform().InverseTransformPosition(Start)),
+        VolumePoint(GetActorTransform().InverseTransformVectorNoScale(Direction)), Distance);
+    if (Target < 0) return TEXT("対象なし。破片または接合先をクリックしてください。");
+    if (SelectedJoinPiece == INDEX_NONE)
+    {
+        if (Pieces.Items[Target].Fixed) return TEXT("まず、分離して落ちた破片を選んでください。");
+        SelectedJoinPiece = Target;
+        return TEXT("破片を選択しました。次に接合先をクリック。同じ破片または8で選択解除。");
+    }
+    if (Target == SelectedJoinPiece)
+    {
+        ClearJoinSelection();
+        return TEXT("選択を解除しました。戻す破片を選んでください。");
+    }
+    const double Started = FPlatformTime::Seconds();
+    const int32 Source = SelectedJoinPiece;
+    const int32 Result = Pieces.Join(Source, Target);
+    LastEditMilliseconds = (FPlatformTime::Seconds() - Started) * 1000;
+    if (Result < 0)
+    {
+        UE_LOG(LogTemp, Display, TEXT("AP5_JOIN_REJECTED: source=%d target=%d reason=%d"), Source, Target, Result);
+        if (Result == -2) return TEXT("共通の分離元がないため接合できません。別の接合先を選んでください。");
+        if (Result == -3) return TEXT("元の位置でもつながりません。間の破片を先に戻すか、別の接合先を選んでください。");
+        return TEXT("接合対象が無効です。8で選択を解除してください。");
+    }
+    // データの番号とコンポーネントの番号をそろえ、吸収した破片の物理ボディを除去する。
+    PieceMeshes[Source]->DestroyComponent();
+    PieceMeshes.RemoveAt(Source);
+    ClearJoinSelection();
+    RebuildMesh(Result);
+    SetActorTickEnabled(true);
+    LastEditMilliseconds = (FPlatformTime::Seconds() - Started) * 1000;
+    UE_LOG(LogTemp, Display, TEXT("AP5_JOIN: source=%d target=%d result=%d total=%d cpu_ms=%.2f"),
+        Source, Target, Result, static_cast<int32>(Pieces.Items.size()), LastEditMilliseconds);
+    return FString::Printf(TEXT("接合しました。接合先の姿勢に合わせて統合 / CPU処理 %.1f ms。再加工できます。"),
+        LastEditMilliseconds);
+}
+
 void AAp5Monster::SyncPhysicsState()
 {
     for (int32 I = 0; I < PieceMeshes.Num(); ++I)
@@ -245,6 +295,7 @@ void AAp5Monster::Tick(float DeltaSeconds)
 
 void AAp5Monster::ResetShape()
 {
+    ClearJoinSelection();
     for (UDynamicMeshComponent* Mesh : PieceMeshes) Mesh->DestroyComponent();
     PieceMeshes.Empty();
     Pieces.Reset(InitialVolume);

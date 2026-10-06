@@ -16,6 +16,8 @@ public:
     AAp5Observer();
     virtual void BeginPlay() override;
     virtual void PlayerTick(float DeltaTime) override;
+    bool IsJoinMode() const { return bJoinMode; }
+    bool GetJoinMarker(FVector2D& ScreenPosition) const;
     bool IsImpactMode() const { return bImpactMode; }
     bool IsRepairMode() const { return bRepairMode; }
     bool IsCutMode() const { return bCutMode; }
@@ -31,6 +33,7 @@ private:
     TObjectPtr<ACameraActor> ObservationCamera;
     UPROPERTY()
     TObjectPtr<AAp5Monster> TestMonster;
+    bool bJoinMode = false;
     bool bImpactMode = true;
     bool bRepairMode = false;
     bool bCutMode = false;

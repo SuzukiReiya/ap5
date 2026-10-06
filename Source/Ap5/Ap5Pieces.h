@@ -1,13 +1,22 @@
 #pragma once
 
 #include "Ap5Volume.h"
+#include <memory>
 
 namespace Ap5Volume
 {
+// 分離前の形状を兄弟間で共有する。複数回切った破片も共通の分離元を探せる。
+struct Separation
+{
+    Field Before;
+    std::shared_ptr<const Separation> Parent;
+};
+
 // 本体と破片は同じデータを持ち、固定の有無だけで落下を切り替える。
 struct Piece
 {
     Field Volume;
+    std::shared_ptr<const Separation> Origin;
     FallState Motion;
     bool Fixed=false;
 
@@ -70,13 +79,11 @@ public:
         return Total;
     }
 
-    // 手前の塊だけに当てる。次の一発では加工済みの表面を改めて探す。
-    int Impact(const Point& Start,const Point& Direction,double Radius,double Depth,std::vector<int>& Changed,int MaximumPieces=33)
+    int Pick(const Point& Start,const Point& Direction,double& Nearest) const
     {
-        Changed.clear();
-        if (Direction.Length()<1e-12 || Radius<=0 || Depth<=0) return 0;
+        Nearest=4000;
+        if (Direction.Length()<1e-12) return -1;
         const Point Axis=Direction.Unit();
-        double Nearest=4000;
         int Target=-1;
         for (size_t I=0;I<Items.size();++I)
         {
@@ -87,6 +94,52 @@ public:
                 Target=static_cast<int>(I);
             }
         }
+        return Target;
+    }
+
+    // 選んだ破片を接合先の姿勢へ合わせる。成功時だけ元の破片を除去する。
+    // 戻り値：接合先の新番号、-1=対象不正、-2=共通の分離元なし、-3=つながらない。
+    int Join(int Source,int Target)
+    {
+        if (Source<0 || Target<0 || Source==Target || Source>=static_cast<int>(Items.size())
+            || Target>=static_cast<int>(Items.size()) || Items[Source].Fixed) return -1;
+        std::shared_ptr<const Separation> Common;
+        for (std::shared_ptr<const Separation> A=Items[Source].Origin; A && !Common; A=A->Parent)
+            for (std::shared_ptr<const Separation> B=Items[Target].Origin; B; B=B->Parent)
+                if (A==B) { Common=A; break; }
+        if (!Common) return -2;
+        Field Joined;
+        if (!Items[Source].Volume.JoinAtSeam(Items[Target].Volume,Common->Before,Joined)) return -3;
+        Items[Target].Volume=std::move(Joined);
+        Items[Target].Origin=Common;
+        Items[Target].Motion.Landed=false;
+        Items.erase(Items.begin()+Source);
+        const int NewTarget=Target-(Source<Target ? 1 : 0);
+        // 全兄弟が再び一つになった履歴は畳み、切断・接合の反復で蓄積させない。
+        while (Items[NewTarget].Origin)
+        {
+            bool HasSibling=false;
+            for (size_t I=0;I<Items.size();++I)
+            {
+                if (static_cast<int>(I)==NewTarget || Items[I].Volume.MaterialCount()==0) continue;
+                for (std::shared_ptr<const Separation> P=Items[I].Origin; P; P=P->Parent)
+                    if (P==Items[NewTarget].Origin) { HasSibling=true; break; }
+                if (HasSibling) break;
+            }
+            if (HasSibling) break;
+            Items[NewTarget].Origin=Items[NewTarget].Origin->Parent;
+        }
+        return NewTarget;
+    }
+
+    // 手前の塊だけに当てる。次の一発では加工済みの表面を改めて探す。
+    int Impact(const Point& Start,const Point& Direction,double Radius,double Depth,std::vector<int>& Changed,int MaximumPieces=33)
+    {
+        Changed.clear();
+        if (Direction.Length()<1e-12 || Radius<=0 || Depth<=0) return 0;
+        const Point Axis=Direction.Unit();
+        double Nearest=0;
+        const int Target=Pick(Start,Axis,Nearest);
         if (Target<0) return 0;
         Field Edited=Items[Target].Volume;
         const int Count=Edited.Dent(Items[Target].ToLocal(Start+Axis*Nearest),Items[Target].ToLocalVector(Axis),Radius,Depth);
@@ -156,8 +209,17 @@ private:
             const int Count=Parts[J].MaterialCount();
             if (Count>LargestCount) { LargestCount=Count; Largest=J; }
         }
+        std::shared_ptr<const Separation> NewOrigin=Items[Index].Origin;
+        if (Parts.size()>1)
+        {
+            std::shared_ptr<Separation> Record=std::make_shared<Separation>();
+            Record->Before=Items[Index].Volume;
+            Record->Parent=Items[Index].Origin;
+            NewOrigin=Record;
+        }
         const bool ParentFixed=Items[Index].Fixed;
         Piece ParentState;
+        ParentState.Origin=NewOrigin;
         ParentState.Motion=Items[Index].Motion;
         ParentState.Translation=Items[Index].Translation;
         ParentState.AxisX=Items[Index].AxisX;
@@ -166,6 +228,7 @@ private:
         ParentState.OriginVelocity=Items[Index].OriginVelocity;
         ParentState.AngularVelocity=Items[Index].AngularVelocity;
         Items[Index].Volume=std::move(Parts[Largest]);
+        Items[Index].Origin=NewOrigin;
         Items[Index].Fixed=ParentFixed && HasSupport(Items[Index].Volume);
         Items[Index].Motion.Landed=false;
         Changed.push_back(static_cast<int>(Index));

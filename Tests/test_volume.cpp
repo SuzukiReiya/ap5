@@ -39,6 +39,13 @@ void CheckSurface(const Field& Volume)
     for (const std::pair<const EdgeKey,int>& Edge : Edges) assert(Edge.second==2);
 }
 
+int PieceAt(const Ap5Volume::PieceCollection& Scene,const Point& Local)
+{
+    for (size_t I=0;I<Scene.Items.size();++I)
+        if (Scene.Items[I].Volume.Sample(Local)<0) return static_cast<int>(I);
+    return -1;
+}
+
 int main()
 {
     Field Volume;
@@ -452,5 +459,73 @@ int main()
     Scene.Reset(Initial);
     assert(Scene.Items.size()==1 && Scene.Items[0].Fixed);
     std::cout << "支持判定：浮いた最大塊の固定解除・両足の独立支持・支持点消去・修復後も自由状態を確認\n";
+
+    // 接合は全リセットではない。切断前と切断後に開けた離れた穴を残す。
+    Field Damaged=Initial;
+    Damaged.Brush(Point(-200,-12,185),Point(1,0,0),7,false);
+    Scene.Reset(Damaged);
+    assert(Scene.Cut(Point(0,0,145),Point(0,0,1),Changed)==1);
+    int Upper=PieceAt(Scene,Point(0,0,170)), Lower=PieceAt(Scene,Point(0,0,120));
+    assert(Upper>=0 && Lower>=0 && Upper!=Lower && !Scene.Items[Upper].Fixed);
+    Scene.Items[Upper].Volume.Brush(Point(-200,12,195),Point(1,0,0),7,false);
+    Scene.Items[Upper].Translation=Point(150,70,-30);
+    Scene.Items[Upper].AxisX=Point(0,0,1); Scene.Items[Upper].AxisY=Point(1,0,0); Scene.Items[Upper].AxisZ=Point(0,1,0);
+    const Point PickStart=Scene.Items[Upper].ToWorld(Point(-200,0,170));
+    const Point PickDirection=Scene.Items[Upper].ToWorldVector(Point(1,0,0));
+    double PickDistance=0;
+    assert(Scene.Pick(PickStart,PickDirection,PickDistance)==Upper);
+    std::weak_ptr<const Ap5Volume::Separation> History=Scene.Items[Upper].Origin;
+    assert(Scene.Join(Upper,Lower)==0 && Scene.Items.size()==1 && Scene.Items[0].Fixed);
+    assert(Scene.Items[0].Translation.Length()==0 && Scene.Items[0].AxisX.X==1);
+    assert(Scene.Items[0].Volume.Sample(Point(0,-12,185))>0);
+    assert(Scene.Items[0].Volume.Sample(Point(0,12,195))>0);
+    assert(Scene.Items[0].Volume.Sample(Point(0,0,145))<0);
+    assert(Scene.Items[0].Volume.Components().size()==1);
+    assert(History.expired() && !Scene.Items[0].Origin);
+    CheckSurface(Scene.Items[0].Volume);
+    // 再接合後にも再切断・再接合でき、履歴を積み上げ続けない。
+    for (int I=0;I<3;++I)
+    {
+        assert(Scene.Cut(Point(0,0,170),Point(0,0,1),Changed)==1);
+        Upper=PieceAt(Scene,Point(0,0,205)); Lower=PieceAt(Scene,Point(0,0,120));
+        assert(Scene.Join(Upper,Lower)==0);
+        assert(!Scene.Items[0].Origin);
+    }
+    Scene.Brush(Point(-200,0,160),Point(1,0,0),7,false,Changed);
+    assert(Scene.Items[0].Volume.Sample(Point(0,0,160))>0);
+    Scene.Brush(Point(-200,0,160),Point(1,0,0),10,true,Changed);
+    assert(Scene.Items[0].Volume.Sample(Point(0,0,160))<0);
+
+    // 間の破片が欠けている場合は接合を拒否し、選択した二つ以外を復元しない。
+    Scene.Reset(Initial);
+    Scene.Cut(Point(0,0,140),Point(0,0,1),Changed);
+    Scene.Cut(Point(0,0,180),Point(0,0,1),Changed);
+    assert(Scene.Items.size()==3);
+    Upper=PieceAt(Scene,Point(0,0,200)); Lower=PieceAt(Scene,Point(0,0,120));
+    int Middle=PieceAt(Scene,Point(0,0,160));
+    const int UpperCount=Scene.Items[Upper].Volume.MaterialCount();
+    assert(Scene.Join(Upper,Lower)==-3 && Scene.Items.size()==3);
+    assert(Scene.Items[Upper].Volume.MaterialCount()==UpperCount);
+    // 自由な接合先へ合わせる場合は、接合先の姿勢と速度を保持する。
+    Scene.Items[Middle].Translation=Point(40,50,-60);
+    Scene.Items[Middle].OriginVelocity=Point(1,2,3);
+    Scene.Items[Middle].AngularVelocity=Point(0,0,2);
+    const int Combined=Scene.Join(Upper,Middle);
+    assert(Combined>=0 && Scene.Items.size()==2 && !Scene.Items[Combined].Fixed);
+    assert((Scene.Items[Combined].Translation-Point(40,50,-60)).Length()<1e-9);
+    assert((Scene.Items[Combined].OriginVelocity-Point(1,2,3)).Length()<1e-9);
+    assert(Scene.Items[Combined].AngularVelocity.Z==2);
+    Lower=PieceAt(Scene,Point(0,0,120));
+    assert(Scene.Join(Combined,Lower)==0 && Scene.Items[0].Fixed);
+    assert(Scene.Items.size()==1 && !Scene.Items[0].Origin);
+    // 不正な選択・固定された接合元・別の分離元は変更せず拒否。
+    assert(Scene.Join(0,0)==-1 && Scene.Join(-1,0)==-1);
+    Ap5Volume::Piece Unrelated; Unrelated.Volume=Initial;
+    Scene.Items.push_back(Unrelated);
+    assert(Scene.Join(0,1)==-1);
+    assert(Scene.Join(1,0)==-2 && Scene.Items.size()==2);
+    Scene.Reset(Initial);
+    assert(Scene.Items.size()==1 && !Scene.Items[0].Origin);
+    std::cout << "接合：姿勢合わせ・穴の保持・隙間補完・再加工・多段分離・不正な接合拒否・履歴解放を確認\n";
 
 }
