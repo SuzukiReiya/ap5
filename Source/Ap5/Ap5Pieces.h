@@ -53,6 +53,30 @@ public:
         return Total;
     }
 
+    // 手前の塊だけに当てる。次の一発では加工済みの表面を改めて探す。
+    int Impact(const Point& Start,const Point& Direction,double Radius,double Depth,std::vector<int>& Changed)
+    {
+        Changed.clear();
+        if (Direction.Length()<1e-12 || Radius<=0 || Depth<=0) return 0;
+        const Point Axis=Direction.Unit();
+        double Nearest=4000;
+        int Target=-1;
+        for (size_t I=0;I<Items.size();++I)
+        {
+            double Distance=0;
+            if (Items[I].Volume.Trace(Items[I].ToLocal(Start),Axis,Nearest,Distance))
+            {
+                Nearest=Distance;
+                Target=static_cast<int>(I);
+            }
+        }
+        if (Target<0) return 0;
+        Piece& Item=Items[Target];
+        const int Count=Item.Volume.Dent(Item.ToLocal(Start+Axis*Nearest),Axis,Radius,Depth);
+        if (Count>0) Changed.push_back(Target);
+        return Count;
+    }
+
     // 同じ面が横切る全ての塊を加工する。上限超過時は一つも変更しない。
     int Cut(const Point& PlanePoint,const Point& Normal,std::vector<int>& Changed,int MaximumPieces=33)
     {

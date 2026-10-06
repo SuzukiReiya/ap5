@@ -184,6 +184,63 @@ public:
 
     void Reset() { Values = Original; }
 
+    // 格子内の材料に最初に当たる距離。距離場は厳密な距離ではないため定間隔で探索する。
+    bool Trace(const Point& Start,const Point& Direction,double MaximumDistance,double& Distance) const
+    {
+        if (Values.empty() || Direction.Length()<1e-12 || MaximumDistance<=0) return false;
+        const Point Axis=Direction.Unit();
+        const double S[3]={Start.X,Start.Y,Start.Z}, D[3]={Axis.X,Axis.Y,Axis.Z};
+        const double Low[3]={Origin.X,Origin.Y,Origin.Z};
+        const double High[3]={Origin.X+(NX-1)*Spacing,Origin.Y+(NY-1)*Spacing,Origin.Z+(NZ-1)*Spacing};
+        double Enter=0, Exit=MaximumDistance;
+        for (int K=0;K<3;++K)
+        {
+            if (std::abs(D[K])<1e-12)
+            {
+                if (S[K]<Low[K] || S[K]>High[K]) return false;
+                continue;
+            }
+            double A=(Low[K]-S[K])/D[K], B=(High[K]-S[K])/D[K];
+            if (B<A) std::swap(A,B);
+            Enter=std::max(Enter,A); Exit=std::min(Exit,B);
+            if (Enter>Exit) return false;
+        }
+        double Previous=Enter;
+        for (double T=Enter; ; T=std::min(Exit,T+Spacing*0.2))
+        {
+            if (Sample(Start+Axis*T)<-1e-7)
+            {
+                double A=Previous, B=T;
+                for (int I=0;I<16;++I)
+                {
+                    const double Middle=(A+B)*0.5;
+                    if (Sample(Start+Axis*Middle)<0) B=Middle; else A=Middle;
+                }
+                Distance=B;
+                return true;
+            }
+            if (T>=Exit) break;
+            Previous=T;
+        }
+        return false;
+    }
+
+    // 浅い球面状のくぼみ。深さは射線方向、半径は平らな表面での入口の目安。
+    int Dent(const Point& Hit,const Point& Direction,double Radius,double Depth)
+    {
+        if (Radius<=0 || Depth<=0 || Direction.Length()<1e-12) return 0;
+        const double SphereRadius=(Radius*Radius+Depth*Depth)/(2*Depth);
+        const Point Center=Hit-Direction.Unit()*(SphereRadius-Depth);
+        int Changed=0;
+        for (int Z=0;Z<NZ;++Z) for (int Y=0;Y<NY;++Y) for (int X=0;X<NX;++X)
+        {
+            const int I=Index(X,Y,Z);
+            const double Next=std::max(Values[I],SphereRadius-(Position(X,Y,Z)-Center).Length());
+            if (Next-Values[I]>1e-9) { Values[I]=Next; ++Changed; }
+        }
+        return Changed;
+    }
+
     // 視線方向の半無限円柱。修復も現在の体積に対する加算で、履歴の巻き戻しではない。
     int Brush(const Point& Start, const Point& Direction, double Radius, bool Repair)
     {

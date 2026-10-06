@@ -196,4 +196,54 @@ int main()
     Scene.Reset(Initial);
     assert(Scene.Items.size()==1 && Scene.Items[0].Fixed && Scene.Items[0].Motion.OffsetZ==0);
     std::cout << "共通加工：着地後・落下中の再切断、位置と速度の継承、破片の穴あけ・修復、上限とリセットを確認\n";
+    // 一発では表面だけをへこませ、同じ射線の繰り返しで貫通する。
+    Field TargetVolume; TargetVolume.Initialize(Point(40,43,47));
+    Scene.Reset(TargetVolume);
+    const Point ShotStart(-200,1,2), ShotDirection(1,0,0);
+    double BeforeHit=0, AfterHit=0;
+    assert(Scene.Items[0].Volume.Trace(ShotStart,ShotDirection,4000,BeforeHit));
+    assert(Scene.Impact(ShotStart,ShotDirection,20,8,Changed)>0);
+    assert(Changed.size()==1 && Changed[0]==0);
+    assert(Scene.Items[0].Volume.Trace(ShotStart,ShotDirection,4000,AfterHit));
+    assert(AfterHit>BeforeHit+3 && AfterHit<BeforeHit+12);
+    assert(Scene.Items[0].Volume.Sample(Point(0,1,2))<0);
+    assert(Scene.Items[0].Volume.Sample(Point(35,1,2))<0);
+    CheckSurface(Scene.Items[0].Volume);
+    int Shots=1;
+    while (Scene.Items[0].Volume.Trace(ShotStart,ShotDirection,4000,BeforeHit) && Shots<40)
+    {
+        assert(Scene.Impact(ShotStart,ShotDirection,20,8,Changed)>0);
+        ++Shots;
+        if (Scene.Items[0].Volume.Trace(ShotStart,ShotDirection,4000,AfterHit))
+            assert(AfterHit>BeforeHit);
+    }
+    assert(Shots>1 && Shots<40);
+    CheckSurface(Scene.Items[0].Volume);
+    assert(Scene.Impact(ShotStart,ShotDirection,20,8,Changed)==0 && Changed.empty());
+    assert(Scene.Impact(Point(-200,100,0),ShotDirection,20,8,Changed)==0);
+    Scene.Brush(ShotStart,ShotDirection,25,true,Changed);
+    assert(Scene.Items[0].Volume.Sample(Point(0,1,2))<0);
+
+    // 後ろの塊を先に登録しても最も手前だけに命中する。落下後の座標にも対応。
+    Scene.Reset(TargetVolume);
+    Ap5Volume::Piece Front;
+    Ap5Volume::Ellipsoid FrontShape;
+    FrontShape.Center=Point(-120,0,100); FrontShape.Radii=Point(30,35,40);
+    Front.Volume.InitializeUnion({FrontShape});
+    Front.Motion.OffsetZ=-100;
+    Scene.Items.push_back(Front);
+    const int BackCount=Scene.Items[0].Volume.MaterialCount();
+    assert(Scene.Impact(ShotStart,ShotDirection,20,8,Changed)>0);
+    assert(Changed.size()==1 && Changed[0]==1);
+    assert(Scene.Items[0].Volume.MaterialCount()==BackCount);
+    for (int I=0;I<40 && Changed[0]==1;++I)
+        assert(Scene.Impact(ShotStart,ShotDirection,20,8,Changed)>0 && Changed.size()==1);
+    assert(Changed[0]==0);
+    assert(Scene.Items[0].Volume.MaterialCount()<BackCount);
+    // 逆方向と不正な射線。
+    assert(TargetVolume.Trace(Point(200,1,2),Point(-1,0,0),4000,BeforeHit));
+    assert(!TargetVolume.Trace(ShotStart,Point(),4000,BeforeHit));
+    assert(!TargetVolume.Trace(ShotStart,ShotDirection,10,BeforeHit));
+    std::cout << "弾痕：浅いくぼみ・反復貫通・閉曲面・修復・手前優先・移動済み破片を確認\n";
+
 }

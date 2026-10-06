@@ -122,6 +122,22 @@ int32 AAp5Monster::ApplyBrush(const FVector& Start, const FVector& Direction, fl
     return Samples;
 }
 
+int32 AAp5Monster::ApplyImpact(const FVector& Start, const FVector& Direction, float Radius)
+{
+    const double Started = FPlatformTime::Seconds();
+    const FVector LocalStart = GetActorTransform().InverseTransformPosition(Start);
+    const FVector LocalDirection = GetActorTransform().InverseTransformVectorNoScale(Direction);
+    std::vector<int> Changed;
+    const int32 Samples = Pieces.Impact(
+        Ap5Volume::Point(LocalStart.X, LocalStart.Y, LocalStart.Z),
+        Ap5Volume::Point(LocalDirection.X, LocalDirection.Y, LocalDirection.Z), Radius, 8.0, Changed);
+    if (!Changed.empty()) RefreshPieces(Changed);
+    LastEditMilliseconds = (FPlatformTime::Seconds() - Started) * 1000;
+    UE_LOG(LogTemp, Display, TEXT("AP5_IMPACT: radius_cm=%.0f depth_cm=8 samples=%d pieces=%d cpu_ms=%.2f"),
+        Radius, Samples, static_cast<int32>(Changed.size()), LastEditMilliseconds);
+    return Samples;
+}
+
 int32 AAp5Monster::Cut(const FVector& PlanePoint, const FVector& PlaneNormal)
 {
     const double Started = FPlatformTime::Seconds();

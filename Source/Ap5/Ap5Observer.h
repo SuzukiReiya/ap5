@@ -16,6 +16,7 @@ public:
     AAp5Observer();
     virtual void BeginPlay() override;
     virtual void PlayerTick(float DeltaTime) override;
+    bool IsImpactMode() const { return bImpactMode; }
     bool IsRepairMode() const { return bRepairMode; }
     bool IsCutMode() const { return bCutMode; }
     bool IsDrawingCut() const { return bDrawingCut; }
@@ -30,6 +31,7 @@ private:
     TObjectPtr<ACameraActor> ObservationCamera;
     UPROPERTY()
     TObjectPtr<AAp5Monster> TestMonster;
+    bool bImpactMode = true;
     bool bRepairMode = false;
     bool bCutMode = false;
     bool bDrawingCut = false;

@@ -108,9 +108,10 @@ void AAp5Observer::PlayerTick(float DeltaTime)
             break;
         }
     }
-    if (WasInputKeyJustPressed(EKeys::One)) { bRepairMode = false; bCutMode = false; bDrawingCut = false; }
-    if (WasInputKeyJustPressed(EKeys::Two)) { bRepairMode = true; bCutMode = false; bDrawingCut = false; }
-    if (WasInputKeyJustPressed(EKeys::Six)) { bCutMode = true; bDrawingCut = false; }
+    if (WasInputKeyJustPressed(EKeys::One)) { bImpactMode = false; bRepairMode = false; bCutMode = false; bDrawingCut = false; }
+    if (WasInputKeyJustPressed(EKeys::Two)) { bImpactMode = false; bRepairMode = true; bCutMode = false; bDrawingCut = false; }
+    if (WasInputKeyJustPressed(EKeys::Six)) { bImpactMode = false; bCutMode = true; bDrawingCut = false; }
+    if (WasInputKeyJustPressed(EKeys::Seven)) { bImpactMode = true; bRepairMode = false; bCutMode = false; bDrawingCut = false; }
     if (WasInputKeyJustPressed(EKeys::Three)) BrushRadius = 12;
     if (WasInputKeyJustPressed(EKeys::Four)) BrushRadius = 20;
     if (WasInputKeyJustPressed(EKeys::Five)) BrushRadius = 30;
@@ -158,9 +159,10 @@ void AAp5Observer::PlayerTick(float DeltaTime)
         FVector Start, Direction;
         if (DeprojectMousePositionToWorld(Start, Direction))
         {
-            const int32 ChangedSamples = TestMonster->ApplyBrush(Start, Direction, BrushRadius, bRepairMode);
+            const int32 ChangedSamples = bImpactMode ? TestMonster->ApplyImpact(Start, Direction, BrushRadius)
+                : TestMonster->ApplyBrush(Start, Direction, BrushRadius, bRepairMode);
             EditStatus = FString::Printf(TEXT("%s：更新 %d 格子点 / CPU処理 %.1f ms（描画完了までの時間は含みません）"),
-                bRepairMode ? TEXT("修復") : TEXT("穴あけ"), ChangedSamples, TestMonster->LastEditMilliseconds);
+                bImpactMode ? TEXT("弾痕") : (bRepairMode ? TEXT("修復") : TEXT("穴あけ")), ChangedSamples, TestMonster->LastEditMilliseconds);
         }
     }
 }
@@ -171,13 +173,13 @@ void AAp5ObserverHUD::DrawHUD()
     DrawRect(FLinearColor(0, 0, 0, 0.75f), 12, 12, 1000, 134);
     const AAp5Observer* Observer = Cast<AAp5Observer>(GetOwningPlayerController());
     if (Observer == nullptr) return;
-    DrawText(FString::Printf(TEXT("体積加工：%s　半径 %.0f cm　1：穴あけ　2：修復　6：切断（左ドラッグ）"),
-        Observer->IsCutMode() ? TEXT("切断") : (Observer->IsRepairMode() ? TEXT("修復") : TEXT("穴あけ")),
+    DrawText(FString::Printf(TEXT("%s　半径 %.0f cm　7：弾痕　1：貫通穴　2：修復　6：切断（左ドラッグ）"),
+        Observer->IsImpactMode() ? TEXT("弾痕") : (Observer->IsCutMode() ? TEXT("切断") : (Observer->IsRepairMode() ? TEXT("修復") : TEXT("穴あけ"))),
         Observer->GetBrushRadius()), FColor::White, 24, 20);
     DrawText(TEXT("3：細い（12 cm）　4：標準（20 cm）　5：太い（30 cm）　Backspace：形状を全リセット"), FColor::White, 24, 44);
     DrawText(TEXT("右ドラッグ／矢印：回転　ホイール／PageUp・Down：ズーム　R：視点を戻す　Esc：終了"), FColor::White, 24, 68);
     DrawText(Observer->GetEditStatus(), FColor::Yellow, 24, 92);
-    DrawText(TEXT("本体・破片とも加工可能。切断は黄色い直線全体で奥まで。修復は各塊の切断時の形まで。"), FColor::White, 24, 116);
+    DrawText(TEXT("弾痕は繰り返し当てると貫通。本体・破片とも加工可能。修復は各塊の切断時の形まで。"), FColor::White, 24, 116);
     if (Observer->IsDrawingCut())
     {
         const FVector2D Start = Observer->GetCutStart();
