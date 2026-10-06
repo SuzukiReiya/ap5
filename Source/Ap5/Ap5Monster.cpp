@@ -134,7 +134,8 @@ void AAp5Monster::RebuildMesh(int32 Index)
     Component->UpdateCollision(false);
     if (!Boxes.empty())
     {
-        Component->SetCollisionObjectType(State.Fixed ? ECC_WorldStatic : ECC_PhysicsBody);
+        Component->SetCollisionObjectType(State.Fixed
+            ? (State.Driven ? ECC_WorldDynamic : ECC_WorldStatic) : ECC_PhysicsBody);
         Component->SetCollisionResponseToAllChannels(ECR_Block);
         Component->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
         Component->SetUseCCD(true, NAME_None);
@@ -147,8 +148,9 @@ void AAp5Monster::RebuildMesh(int32 Index)
             Component->WakeAllRigidBodies();
         }
     }
-    UE_LOG(LogTemp, Display, TEXT("AP5_COLLISION: index=%d boxes=%d fixed=%d simulated=%d"),
-        Index, static_cast<int32>(Boxes.size()), State.Fixed ? 1 : 0, Component->IsSimulatingPhysics() ? 1 : 0);
+    UE_LOG(LogTemp, Display, TEXT("AP5_COLLISION: index=%d boxes=%d fixed=%d driven=%d simulated=%d"),
+        Index, static_cast<int32>(Boxes.size()), State.Fixed ? 1 : 0, State.Driven ? 1 : 0,
+        Component->IsSimulatingPhysics() ? 1 : 0);
 }
 
 void AAp5Monster::RefreshPieces(const std::vector<int>& Changed)
@@ -287,10 +289,50 @@ void AAp5Monster::SyncPhysicsState()
     }
 }
 
+void AAp5Monster::UpdateArmMotion(float DeltaSeconds)
+{
+    if (!bArmMotionTest) return;
+    ArmMotionTime+=FMath::Max(0.0f,DeltaSeconds);
+    const float Frequency=2.0f*PI/3.0f;
+    const float Phase=ArmMotionTime*Frequency;
+    const float AngleRadians=FMath::DegreesToRadians(35.0f*FMath::Sin(Phase));
+    const float AngularSpeed=FMath::DegreesToRadians(35.0f)*Frequency*FMath::Cos(Phase);
+    const FQuat Rotation(FVector::RightVector,AngleRadians);
+    for (int32 I=0;I<static_cast<int32>(Pieces.Items.size());++I)
+    {
+        Ap5Volume::Piece& State=Pieces.Items[I];
+        if (!State.Driven || !State.Fixed || !PieceMeshes.IsValidIndex(I)) continue;
+        const FVector Pivot=EnginePoint(State.JointPivot);
+        const FVector RotatedPivot=Rotation.RotateVector(Pivot);
+        const FVector Translation=Pivot-RotatedPivot;
+        const FVector Omega=FVector::RightVector*AngularSpeed;
+        const FVector OriginVelocity=-FVector::CrossProduct(Omega,RotatedPivot);
+        State.AxisX=VolumePoint(Rotation.RotateVector(FVector::ForwardVector));
+        State.AxisY=VolumePoint(Rotation.RotateVector(FVector::RightVector));
+        State.AxisZ=VolumePoint(Rotation.RotateVector(FVector::UpVector));
+        State.Translation=VolumePoint(Translation);
+        State.OriginVelocity=VolumePoint(OriginVelocity);
+        State.AngularVelocity=VolumePoint(Omega);
+        const FTransform LocalTransform(Rotation,Translation);
+        PieceMeshes[I]->SetWorldTransform(
+            LocalTransform*GetActorTransform(),false,nullptr,ETeleportType::TeleportPhysics);
+    }
+}
+
 void AAp5Monster::Tick(float DeltaSeconds)
 {
     Super::Tick(DeltaSeconds);
+    UpdateArmMotion(DeltaSeconds);
     SyncPhysicsState();
+}
+
+bool AAp5Monster::ToggleArmMotionTest()
+{
+    bArmMotionTest=!bArmMotionTest;
+    ArmMotionTime=0.0f;
+    ResetShape();
+    UE_LOG(LogTemp, Display, TEXT("AP5_ARM_MOTION: enabled=%d"), bArmMotionTest ? 1 : 0);
+    return bArmMotionTest;
 }
 
 void AAp5Monster::ResetShape()
@@ -298,9 +340,32 @@ void AAp5Monster::ResetShape()
     ClearJoinSelection();
     for (UDynamicMeshComponent* Mesh : PieceMeshes) Mesh->DestroyComponent();
     PieceMeshes.Empty();
-    Pieces.Reset(InitialVolume);
-    PieceMeshes.Add(CreatePiece());
-    RebuildMesh(0);
-    SetActorTickEnabled(false);
-    UE_LOG(LogTemp, Display, TEXT("AP5_VOLUME_RESET"));
+    bool ArticulatedReady=true;
+    if (bArmMotionTest)
+    {
+        // +Y側の右腕を肩の外縁で切りしろ無しに分け、肩中心付近を関節拘束点にする。
+        ArticulatedReady=Pieces.ResetArticulated(
+            InitialVolume,Ap5Volume::Point(0,72,233),Ap5Volume::Point(0,1,0),
+            Ap5Volume::Point(0,72,233),Ap5Volume::Point(0,82,233));
+    }
+    else
+    {
+        Pieces.Reset(InitialVolume);
+    }
+    if (!ArticulatedReady)
+    {
+        bArmMotionTest=false;
+        Pieces.Reset(InitialVolume);
+        UE_LOG(LogTemp, Error, TEXT("AP5_ARM_MOTION_SETUP_FAILED"));
+    }
+    for (int32 I=0;I<static_cast<int32>(Pieces.Items.size());++I)
+    {
+        PieceMeshes.Add(CreatePiece());
+        RebuildMesh(I);
+    }
+    ArmMotionTime=0.0f;
+    UpdateArmMotion(0.0f);
+    SetActorTickEnabled(bArmMotionTest);
+    UE_LOG(LogTemp, Display, TEXT("AP5_VOLUME_RESET: articulated=%d pieces=%d"),
+        bArmMotionTest ? 1 : 0, static_cast<int32>(Pieces.Items.size()));
 }

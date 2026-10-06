@@ -19,6 +19,9 @@ struct Piece
     std::shared_ptr<const Separation> Origin;
     FallState Motion;
     bool Fixed=false;
+    // Drivenは関節から拘束されている塊。JointAnchorを失った子は自由破片になる。
+    bool Driven=false;
+    Point JointPivot, JointAnchor;
 
     Point Translation;
     Point AxisX=Point(1,0,0), AxisY=Point(0,1,0), AxisZ=Point(0,0,1);
@@ -56,6 +59,46 @@ public:
         Body.Volume=Initial;
         Body.Fixed=HasSupport(Initial);
         Items.push_back(std::move(Body));
+    }
+
+    // 関節検証用に一つの体積を切りしろ無しで二分する。
+    // JointAnchorを含む側だけを関節駆動し、もう一方は通常の支持点で固定する。
+    bool ResetArticulated(const Field& Initial,const Point& PlanePoint,const Point& PlaneNormal,
+        const Point& JointPivot,const Point& JointAnchor,const std::vector<Point>& Supports = {})
+    {
+        SupportPoints=Supports.empty() ? Initial.LowestMaterialPoints() : Supports;
+        std::vector<Field> Parts=Initial.Partition(PlanePoint,PlaneNormal);
+        if (Parts.size()!=2)
+        {
+            Reset(Initial,Supports);
+            return false;
+        }
+        int DrivenIndex=-1, DrivenCount=0;
+        for (int I=0;I<2;++I)
+        {
+            if (Parts[I].Sample(JointAnchor)<0)
+            {
+                DrivenIndex=I;
+                ++DrivenCount;
+            }
+        }
+        if (DrivenCount!=1)
+        {
+            Reset(Initial,Supports);
+            return false;
+        }
+        Items.clear();
+        for (int I=0;I<2;++I)
+        {
+            Piece Part;
+            Part.Volume=std::move(Parts[I]);
+            Part.Driven=(I==DrivenIndex);
+            Part.Fixed=Part.Driven || HasSupport(Part.Volume);
+            Part.JointPivot=JointPivot;
+            Part.JointAnchor=JointAnchor;
+            Items.push_back(std::move(Part));
+        }
+        return true;
     }
 
     // 先に全対象の加工結果を準備する。分離上限に達したら一切変更しない。
@@ -221,6 +264,9 @@ private:
         Piece ParentState;
         ParentState.Origin=NewOrigin;
         ParentState.Motion=Items[Index].Motion;
+        ParentState.Driven=Items[Index].Driven;
+        ParentState.JointPivot=Items[Index].JointPivot;
+        ParentState.JointAnchor=Items[Index].JointAnchor;
         ParentState.Translation=Items[Index].Translation;
         ParentState.AxisX=Items[Index].AxisX;
         ParentState.AxisY=Items[Index].AxisY;
@@ -229,7 +275,11 @@ private:
         ParentState.AngularVelocity=Items[Index].AngularVelocity;
         Items[Index].Volume=std::move(Parts[Largest]);
         Items[Index].Origin=NewOrigin;
-        Items[Index].Fixed=ParentFixed && HasSupport(Items[Index].Volume);
+        Items[Index].Driven=ParentState.Driven && Items[Index].Volume.Sample(ParentState.JointAnchor)<0;
+        Items[Index].JointPivot=ParentState.JointPivot;
+        Items[Index].JointAnchor=ParentState.JointAnchor;
+        Items[Index].Fixed=ParentFixed
+            && (ParentState.Driven ? Items[Index].Driven : HasSupport(Items[Index].Volume));
         Items[Index].Motion.Landed=false;
         Changed.push_back(static_cast<int>(Index));
         // 大きさによらず、初期の支持点を残した子だけ固定する。自由になった塊は再固定しない。
@@ -238,7 +288,9 @@ private:
             if (J==Largest) continue;
             Piece Child=ParentState;
             Child.Volume=std::move(Parts[J]);
-            Child.Fixed=ParentFixed && HasSupport(Child.Volume);
+            Child.Driven=ParentState.Driven && Child.Volume.Sample(ParentState.JointAnchor)<0;
+            Child.Fixed=ParentFixed
+                && (ParentState.Driven ? Child.Driven : HasSupport(Child.Volume));
             Child.Motion.Landed=false;
             Changed.push_back(static_cast<int>(Items.size()));
             Items.push_back(std::move(Child));

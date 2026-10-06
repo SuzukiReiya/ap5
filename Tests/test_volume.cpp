@@ -528,4 +528,63 @@ int main()
     assert(Scene.Items.size()==1 && !Scene.Items[0].Origin);
     std::cout << "接合：姿勢合わせ・穴の保持・隙間補完・再加工・多段分離・不正な接合拒否・履歴解放を確認\n";
 
+    // 関節検証用の分割は切りしろを作らず、駆動中の加工と切断後の自由化を両立する。
+    Ap5Volume::Ellipsoid JointBody, JointShoulder, JointArm, JointHand;
+    JointBody.Center=Point(0,0,120); JointBody.Radii=Point(40,50,80);
+    JointShoulder.Center=Point(0,55,145); JointShoulder.Radii=Point(28,30,30);
+    JointArm.Center=Point(0,90,120); JointArm.Radii=Point(24,40,45);
+    JointHand.Center=Point(0,120,85); JointHand.Radii=Point(25,25,30);
+    Field JointModel; JointModel.InitializeUnion({JointBody,JointShoulder,JointArm,JointHand});
+    const Point JointPlane(0,50,145), JointNormal(0,1,0);
+    const Point JointPivot(0,50,145), JointAnchor(0,65,145);
+    assert(Scene.ResetArticulated(JointModel,JointPlane,JointNormal,JointPivot,JointAnchor));
+    assert(Scene.Items.size()==2);
+    int Driven=-1, StaticBody=-1;
+    for (size_t I=0;I<Scene.Items.size();++I)
+    {
+        CheckSurface(Scene.Items[I].Volume);
+        if (Scene.Items[I].Driven) Driven=static_cast<int>(I);
+        else if (Scene.Items[I].Fixed) StaticBody=static_cast<int>(I);
+    }
+    assert(Driven>=0 && StaticBody>=0 && Driven!=StaticBody);
+    Ap5Volume::Piece& MovingArm=Scene.Items[Driven];
+    MovingArm.AxisX=Point(0,0,-1);
+    MovingArm.AxisY=Point(0,1,0);
+    MovingArm.AxisZ=Point(1,0,0);
+    const Point RotatedPivot=MovingArm.ToWorldVector(JointPivot);
+    MovingArm.Translation=JointPivot-RotatedPivot;
+    MovingArm.OriginVelocity=Point(15,0,0);
+    MovingArm.AngularVelocity=Point(0,1,0);
+    const Point LocalShot(-200,115,100), LocalShotAxis(1,0,0), LocalTarget(0,115,100);
+    const Point MovingShot=MovingArm.ToWorld(LocalShot);
+    const Point MovingShotAxis=MovingArm.ToWorldVector(LocalShotAxis);
+    assert(Scene.Brush(MovingShot,MovingShotAxis,8,false,Changed)>0);
+    assert(Scene.Items.size()==2 && Scene.Items[Driven].Volume.Sample(LocalTarget)>0);
+    const Point MovingCutPoint=Scene.Items[Driven].ToWorld(Point(0,95,120));
+    const Point MovingCutNormal=Scene.Items[Driven].ToWorldVector(Point(0,1,0));
+    assert(Scene.Cut(MovingCutPoint,MovingCutNormal,Changed)==1);
+    assert(Scene.Items.size()==3);
+    int DrivenAfter=-1, Detached=-1;
+    for (size_t I=0;I<Scene.Items.size();++I)
+    {
+        if (Scene.Items[I].Driven)
+        {
+            assert(Scene.Items[I].Fixed);
+            DrivenAfter=static_cast<int>(I);
+        }
+        else if (!Scene.Items[I].Fixed && Scene.Items[I].Origin)
+        {
+            Detached=static_cast<int>(I);
+        }
+    }
+    assert(DrivenAfter>=0 && Detached>=0);
+    assert((Scene.Items[Detached].AxisX-Point(0,0,-1)).Length()<1e-9);
+    assert((Scene.Items[Detached].OriginVelocity-Point(15,0,0)).Length()<1e-9);
+    assert((Scene.Items[Detached].AngularVelocity-Point(0,1,0)).Length()<1e-9);
+    const int Rejoined=Scene.Join(Detached,DrivenAfter);
+    assert(Rejoined>=0 && Scene.Items.size()==2);
+    assert(Scene.Items[Rejoined].Driven && Scene.Items[Rejoined].Fixed);
+    CheckSurface(Scene.Items[Rejoined].Volume);
+    std::cout << "関節動作：切りしろ無し分割・駆動中加工・切断時の拘束継承・速度継承・再接合を確認\n";
+
 }

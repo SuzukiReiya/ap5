@@ -255,6 +255,34 @@ public:
         return Result;
     }
 
+    // 関節検証用。材料を平面の両側へ分けるが、切断のような切りしろは作らない。
+    // 両側がそれぞれ一つの連結成分にならない場合は失敗として空配列を返す。
+    std::vector<Field> Partition(const Point& PlanePoint, const Point& PlaneNormal) const
+    {
+        if (PlaneNormal.Length()<1e-12) return {};
+        const Point N=PlaneNormal.Unit();
+        Field Sides[2]={*this,*this};
+        int Counts[2]={0,0};
+        for (int Z=0;Z<NZ;++Z) for (int Y=0;Y<NY;++Y) for (int X=0;X<NX;++X)
+        {
+            const int I=Index(X,Y,Z);
+            const double D=(Position(X,Y,Z)-PlanePoint).Dot(N);
+            Sides[0].Values[I]=std::max(Values[I],D);
+            Sides[1].Values[I]=std::max(Values[I],-D);
+            for (int S=0;S<2;++S) if (Sides[S].Values[I]<0) ++Counts[S];
+        }
+        if (Counts[0]==0 || Counts[1]==0) return {};
+        std::vector<Field> Result;
+        for (int S=0;S<2;++S)
+        {
+            bool Exceeded=false;
+            std::vector<Field> Parts=Sides[S].Components(&Exceeded);
+            if (Exceeded || Parts.size()!=1) return {};
+            Result.push_back(std::move(Parts[0]));
+        }
+        return Result;
+    }
+
     void Initialize(const Point& Radii, double InSpacing = 5)
     {
         Spacing = InSpacing;
