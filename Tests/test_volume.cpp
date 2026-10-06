@@ -221,8 +221,13 @@ int main()
     CheckSurface(Scene.Items[0].Volume);
     assert(Scene.Impact(ShotStart,ShotDirection,20,8,Changed)==0 && Changed.empty());
     assert(Scene.Impact(Point(-200,100,0),ShotDirection,20,8,Changed)==0);
+    // 分離前の弾痕は、加工前の外形まで修復できる。
+    Scene.Reset(TargetVolume);
+    Scene.Impact(ShotStart,ShotDirection,20,8,Changed);
     Scene.Brush(ShotStart,ShotDirection,25,true,Changed);
-    assert(Scene.Items[0].Volume.Sample(Point(0,1,2))<0);
+    assert(Scene.Items[0].Volume.Trace(ShotStart,ShotDirection,4000,AfterHit));
+    assert(TargetVolume.Trace(ShotStart,ShotDirection,4000,BeforeHit));
+    assert(std::abs(AfterHit-BeforeHit)<0.01);
 
     // 後ろの塊を先に登録しても最も手前だけに命中する。落下後の座標にも対応。
     Scene.Reset(TargetVolume);
@@ -236,8 +241,8 @@ int main()
     assert(Scene.Impact(ShotStart,ShotDirection,20,8,Changed)>0);
     assert(Changed.size()==1 && Changed[0]==1);
     assert(Scene.Items[0].Volume.MaterialCount()==BackCount);
-    for (int I=0;I<40 && Changed[0]==1;++I)
-        assert(Scene.Impact(ShotStart,ShotDirection,20,8,Changed)>0 && Changed.size()==1);
+    for (int I=0;I<40 && Scene.Items[0].Volume.MaterialCount()==BackCount;++I)
+        assert(Scene.Impact(ShotStart,ShotDirection,20,8,Changed)>0 && !Changed.empty());
     assert(Changed[0]==0);
     assert(Scene.Items[0].Volume.MaterialCount()<BackCount);
     // 逆方向と不正な射線。
@@ -245,5 +250,101 @@ int main()
     assert(!TargetVolume.Trace(ShotStart,Point(),4000,BeforeHit));
     assert(!TargetVolume.Trace(ShotStart,ShotDirection,10,BeforeHit));
     std::cout << "弾痕：浅いくぼみ・反復貫通・閉曲面・修復・手前優先・移動済み破片を確認\n";
+
+    // 両側の太い塊を細い首でつなぐ。首が残る穴では分離せず、削り切ると分離。
+    Ap5Volume::Ellipsoid Left, Neck, Right;
+    Left.Center=Point(0,-40,100); Left.Radii=Point(28,32,28);
+    Right=Left; Right.Center.Y=40;
+    Neck.Center=Point(0,0,100); Neck.Radii=Point(10,35,10);
+    Field Connected; Connected.InitializeUnion({Left,Neck,Right});
+    assert(Connected.Components().size()==1);
+    Scene.Reset(Connected);
+    const Point NeckStart(-200,0,100);
+    Scene.Brush(NeckStart,ShotDirection,4,false,Changed);
+    assert(Scene.Items.size()==1);
+    Scene.Brush(NeckStart,ShotDirection,14,false,Changed);
+    assert(Scene.Items.size()==2 && Changed.size()==2);
+    assert(Scene.Items[0].Fixed && !Scene.Items[1].Fixed);
+    for (Ap5Volume::Piece& P : Scene.Items)
+    {
+        assert(P.Volume.Components().size()==1);
+        P.RebuildSurface();
+        CheckSurface(P.Volume);
+    }
+    assert(Scene.Items[1].Motion.Advance(10,0));
+    // 修復で分離時の隙間が埋まって再接続されることはない。
+    Scene.Brush(NeckStart,ShotDirection,30,true,Changed);
+    assert(Scene.Items[0].Volume.Sample(Point(0,0,100))>0);
+
+    // 弾痕の反復でも同じ首を分離し、空中の親の位置・速度を両方に継承する。
+    Scene.Reset(Connected);
+    Scene.Items[0].Fixed=false;
+    Scene.Items[0].Motion.OffsetZ=-12;
+    Scene.Items[0].Motion.VelocityZ=-30;
+    const Point MovingNeckStart(-200,0,88);
+    int NeckShots=0;
+    while (Scene.Items.size()==1 && NeckShots<20)
+    {
+        assert(Scene.Impact(MovingNeckStart,ShotDirection,20,8,Changed)>0);
+        ++NeckShots;
+    }
+    assert(NeckShots>1 && NeckShots<20 && Scene.Items.size()==2);
+    for (Ap5Volume::Piece& P : Scene.Items)
+    {
+        assert(!P.Fixed && P.Motion.OffsetZ==-12 && P.Motion.VelocityZ==-30);
+        P.RebuildSurface(); CheckSurface(P.Volume);
+    }
+
+    // 分離上限超過は穴あけ・弾痕とも元の形状を保持して拒否。
+    Scene.Reset(Connected);
+    const int ConnectedCount=Connected.MaterialCount();
+    assert(Scene.Brush(NeckStart,ShotDirection,14,false,Changed,1)==-1);
+    assert(Changed.empty() && Scene.Items.size()==1);
+    assert(Scene.Items[0].Volume.MaterialCount()==ConnectedCount);
+    int Rejected=0;
+    for (int I=0;I<20;++I)
+    {
+        const int BeforeCount=Scene.Items[0].Volume.MaterialCount();
+        double BeforeDistance=0, AfterDistance=0;
+        Scene.Items[0].Volume.Trace(NeckStart,ShotDirection,4000,BeforeDistance);
+        const int Result=Scene.Impact(NeckStart,ShotDirection,20,8,Changed,1);
+        if (Result<0)
+        {
+            assert(Changed.empty() && Scene.Items.size()==1);
+            assert(Scene.Items[0].Volume.MaterialCount()==BeforeCount);
+            Scene.Items[0].Volume.Trace(NeckStart,ShotDirection,4000,AfterDistance);
+            assert(BeforeDistance==AfterDistance);
+            ++Rejected;
+            break;
+        }
+    }
+    assert(Rejected==1);
+    // 複数対象のうち後半で上限に達しても、手前の加工を確定しない。
+    Scene.Reset(TargetVolume);
+    Ap5Volume::Piece NeckPiece; NeckPiece.Volume=Connected;
+    NeckPiece.Motion.OffsetZ=-100;
+    Scene.Items.push_back(NeckPiece);
+    const int SphereCount=TargetVolume.MaterialCount();
+    assert(Scene.Brush(Point(-200,0,0),ShotDirection,14,false,Changed,2)==-1);
+    assert(Changed.empty() && Scene.Items.size()==2);
+    assert(Scene.Items[0].Volume.MaterialCount()==SphereCount);
+    assert(Scene.Items[1].Volume.MaterialCount()==ConnectedCount);
+    // 連結成分上限と、材料が空になった場合を区別する。
+    std::vector<Ap5Volume::Ellipsoid> ManyShapes;
+    for (int I=0;I<33;++I)
+    {
+        Ap5Volume::Ellipsoid E; E.Center=Point(I*15,0,0); E.Radii=Point(4,4,4);
+        ManyShapes.push_back(E);
+    }
+    Field Many; Many.InitializeUnion(ManyShapes);
+    bool Exceeded=false;
+    assert(Many.Components(&Exceeded).empty() && Exceeded);
+    // 全材料消去を「成分上限」と混同しない。
+    Scene.Reset(Connected);
+    assert(Scene.Brush(NeckStart,ShotDirection,200,false,Changed)>0);
+    assert(Scene.Items.size()==1 && Scene.Items[0].Volume.MaterialCount()==0);
+    Scene.Brush(NeckStart,ShotDirection,200,true,Changed);
+    assert(Scene.Items[0].Volume.MaterialCount()==ConnectedCount);
+    std::cout << "自動分離：接続維持・穴あけと弾痕での分離・落下・状態継承・修復制限・上限拒否を確認\n";
 
 }

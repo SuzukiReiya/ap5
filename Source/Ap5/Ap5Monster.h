@@ -23,6 +23,7 @@ public:
     int32 Cut(const FVector& PlanePoint, const FVector& PlaneNormal);
     void ResetShape();
     double LastEditMilliseconds = 0;
+    int32 LastSeparatedPieces = 0;
 
 private:
     void AddPart(FName Name, const FVector& Center, const FVector& Radii,

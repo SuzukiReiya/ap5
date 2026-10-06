@@ -161,8 +161,9 @@ void AAp5Observer::PlayerTick(float DeltaTime)
         {
             const int32 ChangedSamples = bImpactMode ? TestMonster->ApplyImpact(Start, Direction, BrushRadius)
                 : TestMonster->ApplyBrush(Start, Direction, BrushRadius, bRepairMode);
-            EditStatus = FString::Printf(TEXT("%s：更新 %d 格子点 / CPU処理 %.1f ms（描画完了までの時間は含みません）"),
-                bImpactMode ? TEXT("弾痕") : (bRepairMode ? TEXT("修復") : TEXT("穴あけ")), ChangedSamples, TestMonster->LastEditMilliseconds);
+            if (ChangedSamples < 0) EditStatus = TEXT("分離上限のため加工しませんでした。Backspaceで全リセットできます。");
+            else EditStatus = FString::Printf(TEXT("%s：更新 %d 格子点 / 分離 %d 個 / CPU処理 %.1f ms"),
+                bImpactMode ? TEXT("弾痕") : (bRepairMode ? TEXT("修復") : TEXT("穴あけ")), ChangedSamples, TestMonster->LastSeparatedPieces, TestMonster->LastEditMilliseconds);
         }
     }
 }
@@ -179,7 +180,7 @@ void AAp5ObserverHUD::DrawHUD()
     DrawText(TEXT("3：細い（12 cm）　4：標準（20 cm）　5：太い（30 cm）　Backspace：形状を全リセット"), FColor::White, 24, 44);
     DrawText(TEXT("右ドラッグ／矢印：回転　ホイール／PageUp・Down：ズーム　R：視点を戻す　Esc：終了"), FColor::White, 24, 68);
     DrawText(Observer->GetEditStatus(), FColor::Yellow, 24, 92);
-    DrawText(TEXT("弾痕は繰り返し当てると貫通。本体・破片とも加工可能。修復は各塊の切断時の形まで。"), FColor::White, 24, 116);
+    DrawText(TEXT("つながりを削り切ると分離・落下。本体・破片とも加工可能。修復は直近の分離時の形まで。"), FColor::White, 24, 116);
     if (Observer->IsDrawingCut())
     {
         const FVector2D Start = Observer->GetCutStart();

@@ -100,8 +100,9 @@ public:
     }
 
     // 表面生成に使う四面体の辺に沿って探索する。斜めの細いつながりも維持する。
-    std::vector<Field> Components() const
+    std::vector<Field> Components(bool* ExceededLimit = nullptr, bool SplitOnly = false) const
     {
+        if (ExceededLimit != nullptr) *ExceededLimit=false;
         std::vector<int> Labels(Values.size(),-1), Queue;
         int ComponentCount=0;
         const int Steps[7][3]={{1,0,0},{0,1,0},{0,0,1},{1,1,0},{1,0,1},{0,1,1},{1,1,1}};
@@ -122,15 +123,20 @@ public:
             }
             ++ComponentCount;
             // 極端に細かい加工で全格子のコピーが無制限に増えるのを防ぐ。
-            if (ComponentCount>32) return {};
+            if (ComponentCount>32)
+            {
+                if (ExceededLimit != nullptr) *ExceededLimit=true;
+                return {};
+            }
         }
+        if (SplitOnly && ComponentCount<2) return {};
         std::vector<Field> Result;
         for (int C=0;C<ComponentCount;++C)
         {
             Field Piece=*this;
             for (size_t I=0;I<Values.size();++I)
                 if (Values[I]<0 && Labels[I]!=C) Piece.Values[I]=-Values[I];
-            // 切断時の形を修復の上限にして、別の破片の領域を再生させない。
+            // 分離時の形を修復の上限にして、別の破片の領域を再生させない。
             Piece.Original=Piece.Values;
             Result.push_back(std::move(Piece));
         }
