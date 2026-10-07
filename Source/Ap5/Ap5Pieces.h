@@ -277,8 +277,8 @@ private:
         }
         if (Count==0) return false;
         const Point Center=Volume.MaterialCentroid();
-        // 最下段格子だけでは足裏面積を過小評価するため20cmの余裕を持たせる。
-        const double Margin=20.0;
+        // 5cm格子1セル分だけ許容する。20cmでは片脚時に中央重心まで支持扱いになった。
+        const double Margin=5.0;
         return Center.X>=MinX-Margin && Center.X<=MaxX+Margin
             && Center.Y>=MinY-Margin && Center.Y<=MaxY+Margin;
     }

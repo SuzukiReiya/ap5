@@ -471,7 +471,13 @@ int main()
     Scene.Reset(TwoFootBody);
     assert(Scene.Items.size()==1 && Scene.Items[0].Fixed);
 
-    // 片足側だけを残した同程度の上体では、重心が支持範囲を外れて自由化する。
+    // 左足だけを残し、上体が中央にある実モデル相当でも支持範囲から外れて自由化する。
+    Field CenteredOneFootBody; CenteredOneFootBody.InitializeUnion(
+        {StableTorso,StableLeftFoot,StableLeftLeg});
+    Scene.Reset(CenteredOneFootBody);
+    assert(Scene.Items.size()==1 && !Scene.Items[0].Fixed);
+
+    // さらに上体が反対側へ寄れば当然不安定。
     Ap5Volume::Ellipsoid LeanTorso=StableTorso;
     LeanTorso.Center.Y=28;
     Field OneFootBody; OneFootBody.InitializeUnion({LeanTorso,StableLeftFoot,StableLeftLeg});
@@ -481,7 +487,7 @@ int main()
     // 明示支持点は従来のアンカー用途を維持する。
     Scene.Reset(OneFootBody,{Point(0,-38,15)});
     assert(Scene.Items.size()==1 && Scene.Items[0].Fixed);
-    std::cout << "支持判定：支持点消失・両足支持・重心投影による片足不安定・明示アンカー互換を確認\n";
+    std::cout << "支持判定：支持点消失・両足支持・中央上体の片足不安定・重心偏り・明示アンカー互換を確認\n";
 
     // 接合は全リセットではない。切断前と切断後に開けた離れた穴を残す。
     Field Damaged=Initial;
