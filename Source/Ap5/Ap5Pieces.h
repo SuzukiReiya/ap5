@@ -54,10 +54,11 @@ public:
     void Reset(const Field& Initial,const std::vector<Point>& Supports = {})
     {
         Items.clear();
-        SupportPoints=Supports.empty() ? Initial.LowestMaterialPoints() : Supports;
+        SupportUsesStability=Supports.empty();
+        SupportPoints=SupportUsesStability ? Initial.LowestMaterialPoints() : Supports;
         Piece Body;
         Body.Volume=Initial;
-        Body.Fixed=HasSupport(Initial);
+        Body.Fixed=HasStableSupport(Initial);
         Items.push_back(std::move(Body));
     }
 
@@ -66,7 +67,8 @@ public:
     bool ResetArticulated(const Field& Initial,const Point& PlanePoint,const Point& PlaneNormal,
         const Point& JointPivot,const Point& JointAnchor,const std::vector<Point>& Supports = {})
     {
-        SupportPoints=Supports.empty() ? Initial.LowestMaterialPoints() : Supports;
+        SupportUsesStability=Supports.empty();
+        SupportPoints=SupportUsesStability ? Initial.LowestMaterialPoints() : Supports;
         std::vector<Field> Parts=Initial.Partition(PlanePoint,PlaneNormal);
         if (Parts.size()!=2)
         {
@@ -93,7 +95,7 @@ public:
             Piece Part;
             Part.Volume=std::move(Parts[I]);
             Part.Driven=(I==DrivenIndex);
-            Part.Fixed=Part.Driven || HasSupport(Part.Volume);
+            Part.Fixed=Part.Driven || HasStableSupport(Part.Volume);
             Part.JointPivot=JointPivot;
             Part.JointAnchor=JointAnchor;
             Items.push_back(std::move(Part));
@@ -248,12 +250,37 @@ public:
 
 private:
     std::vector<Point> SupportPoints;
+    bool SupportUsesStability=false;
 
     bool HasSupport(const Field& Volume) const
     {
         for (const Point& P : SupportPoints)
             if (Volume.Sample(P)<0) return true;
         return false;
+    }
+
+    // 自動取得した足裏支持では、材料が触れているだけでなく重心投影が支持範囲内かを見る。
+    // 明示Supportsはテストや固定アンカー用途なので従来どおり「含むか」だけを判定する。
+    bool HasStableSupport(const Field& Volume) const
+    {
+        if (!HasSupport(Volume)) return false;
+        if (!SupportUsesStability) return true;
+
+        double MinX=1e9,MinY=1e9,MaxX=-1e9,MaxY=-1e9;
+        int Count=0;
+        for (const Point& P : SupportPoints)
+        {
+            if (Volume.Sample(P)>=0) continue;
+            MinX=std::min(MinX,P.X); MinY=std::min(MinY,P.Y);
+            MaxX=std::max(MaxX,P.X); MaxY=std::max(MaxY,P.Y);
+            ++Count;
+        }
+        if (Count==0) return false;
+        const Point Center=Volume.MaterialCentroid();
+        // 最下段格子だけでは足裏面積を過小評価するため20cmの余裕を持たせる。
+        const double Margin=20.0;
+        return Center.X>=MinX-Margin && Center.X<=MaxX+Margin
+            && Center.Y>=MinY-Margin && Center.Y<=MaxY+Margin;
     }
 
     static bool PrepareEdit(Field& Edited,bool Repair,std::vector<Field>& Parts)
@@ -312,7 +339,7 @@ private:
         Items[Index].JointPivot=ParentState.JointPivot;
         Items[Index].JointAnchor=ParentState.JointAnchor;
         Items[Index].Fixed=ParentFixed
-            && (ParentState.Driven ? Items[Index].Driven : HasSupport(Items[Index].Volume));
+            && (ParentState.Driven ? Items[Index].Driven : HasStableSupport(Items[Index].Volume));
         Items[Index].Motion.Landed=false;
         Changed.push_back(static_cast<int>(Index));
         // 大きさによらず、初期の支持点を残した子だけ固定する。自由になった塊は再固定しない。
@@ -323,7 +350,7 @@ private:
             Child.Volume=std::move(Parts[J]);
             Child.Driven=ParentState.Driven && Child.Volume.Sample(ParentState.JointAnchor)<0;
             Child.Fixed=ParentFixed
-                && (ParentState.Driven ? Child.Driven : HasSupport(Child.Volume));
+                && (ParentState.Driven ? Child.Driven : HasStableSupport(Child.Volume));
             Child.Motion.Landed=false;
             Changed.push_back(static_cast<int>(Items.size()));
             Items.push_back(std::move(Child));

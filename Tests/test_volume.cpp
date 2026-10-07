@@ -458,7 +458,30 @@ int main()
     assert(!Scene.Items[0].Fixed); // 修復や着地で固定へ戻さない。
     Scene.Reset(Initial);
     assert(Scene.Items.size()==1 && Scene.Items[0].Fixed);
-    std::cout << "支持判定：浮いた最大塊の固定解除・両足の独立支持・支持点消去・修復後も自由状態を確認\n";
+
+    // 自動支持では、支持点が残っていても重心投影が大きく外れれば固定しない。
+    Ap5Volume::Ellipsoid StableTorso, StableLeftFoot, StableRightFoot, StableLeftLeg, StableRightLeg;
+    StableTorso.Center=Point(0,0,85); StableTorso.Radii=Point(28,42,45);
+    StableLeftFoot.Center=Point(0,-38,15); StableLeftFoot.Radii=Point(24,25,15);
+    StableRightFoot=StableLeftFoot; StableRightFoot.Center.Y=38;
+    StableLeftLeg.Center=Point(0,-28,45); StableLeftLeg.Radii=Point(22,24,35);
+    StableRightLeg=StableLeftLeg; StableRightLeg.Center.Y=28;
+    Field TwoFootBody; TwoFootBody.InitializeUnion(
+        {StableTorso,StableLeftFoot,StableRightFoot,StableLeftLeg,StableRightLeg});
+    Scene.Reset(TwoFootBody);
+    assert(Scene.Items.size()==1 && Scene.Items[0].Fixed);
+
+    // 片足側だけを残した同程度の上体では、重心が支持範囲を外れて自由化する。
+    Ap5Volume::Ellipsoid LeanTorso=StableTorso;
+    LeanTorso.Center.Y=28;
+    Field OneFootBody; OneFootBody.InitializeUnion({LeanTorso,StableLeftFoot,StableLeftLeg});
+    Scene.Reset(OneFootBody);
+    assert(Scene.Items.size()==1 && !Scene.Items[0].Fixed);
+
+    // 明示支持点は従来のアンカー用途を維持する。
+    Scene.Reset(OneFootBody,{Point(0,-38,15)});
+    assert(Scene.Items.size()==1 && Scene.Items[0].Fixed);
+    std::cout << "支持判定：支持点消失・両足支持・重心投影による片足不安定・明示アンカー互換を確認\n";
 
     // 接合は全リセットではない。切断前と切断後に開けた離れた穴を残す。
     Field Damaged=Initial;
