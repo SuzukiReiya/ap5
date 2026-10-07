@@ -587,4 +587,37 @@ int main()
     CheckSurface(Scene.Items[Rejoined].Volume);
     std::cout << "関節動作：切りしろ無し分割・駆動中加工・切断時の拘束継承・速度継承・再接合を確認\n";
 
+    // 爆発は球状の欠損を作り、切れた自由破片だけへ外向き速度を加える。
+    Field BlastField; BlastField.Initialize(Point(45,45,45));
+    const int BlastBefore=BlastField.MaterialCount();
+    assert(BlastField.Blast(Point(35,0,0),20)>0);
+    assert(BlastField.MaterialCount()<BlastBefore);
+    assert(BlastField.Sample(Point(35,0,0))>0);
+    assert(BlastField.Sample(Point(-20,0,0))<0);
+    CheckSurface(BlastField);
+
+    Scene.Reset(Connected,{Point(0,-40,80)});
+    const int BlastSamples=Scene.Blast(Point(0,0,100),14,500,Changed);
+    assert(BlastSamples>0);
+    assert(Scene.Items.size()==2 && Changed.size()==2);
+    int BlastFixed=-1, BlastFree=-1;
+    for (size_t I=0;I<Scene.Items.size();++I)
+    {
+        CheckSurface(Scene.Items[I].Volume);
+        if (Scene.Items[I].Fixed) BlastFixed=static_cast<int>(I);
+        else BlastFree=static_cast<int>(I);
+    }
+    assert(BlastFixed>=0 && BlastFree>=0);
+    assert(Scene.Items[BlastFixed].OriginVelocity.Length()<1e-9);
+    assert(Scene.Items[BlastFree].OriginVelocity.Length()>400);
+    assert(Scene.Items[BlastFree].OriginVelocity.Y>0);
+    // 上限超過時は形状も速度も変更しない。
+    Scene.Reset(Connected,{Point(0,-40,80)});
+    const int BlastOriginalCount=Scene.Items[0].Volume.MaterialCount();
+    assert(Scene.Blast(Point(0,0,100),14,500,Changed,1)==-1);
+    assert(Changed.empty() && Scene.Items.size()==1);
+    assert(Scene.Items[0].Volume.MaterialCount()==BlastOriginalCount);
+    assert(Scene.Items[0].OriginVelocity.Length()<1e-9);
+    std::cout << "爆発：球状破壊・自動分離・固定側維持・自由破片への爆風・上限時ロールバックを確認\n";
+
 }
