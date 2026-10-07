@@ -108,18 +108,23 @@ void AAp5Observer::PlayerTick(float DeltaTime)
             break;
         }
     }
+    if (WasInputKeyJustPressed(EKeys::G))
+    {
+        bGrabMode=true; bBlastMode=false; bJoinMode=false; bImpactMode=false; bRepairMode=false; bCutMode=false; bDrawingCut=false;
+        EditStatus=TEXT("把持：分離した破片を左ボタンで掴み、押したまま移動して離してください。");
+    }
     if (WasInputKeyJustPressed(EKeys::Zero))
     {
-        bBlastMode=true; bJoinMode=false; bImpactMode=false; bRepairMode=false; bCutMode=false; bDrawingCut=false;
+        bGrabMode=false; bBlastMode=true; bJoinMode=false; bImpactMode=false; bRepairMode=false; bCutMode=false; bDrawingCut=false;
         EditStatus=TEXT("爆発：クリック地点を中心に球状破壊し、分離破片を外側へ飛ばします。");
     }
-    if (WasInputKeyJustPressed(EKeys::One)) { bBlastMode = false; bJoinMode = false; bImpactMode = false; bRepairMode = false; bCutMode = false; bDrawingCut = false; }
-    if (WasInputKeyJustPressed(EKeys::Two)) { bBlastMode = false; bJoinMode = false; bImpactMode = false; bRepairMode = true; bCutMode = false; bDrawingCut = false; }
-    if (WasInputKeyJustPressed(EKeys::Six)) { bBlastMode = false; bJoinMode = false; bImpactMode = false; bCutMode = true; bDrawingCut = false; }
-    if (WasInputKeyJustPressed(EKeys::Seven)) { bBlastMode = false; bJoinMode = false; bImpactMode = true; bRepairMode = false; bCutMode = false; bDrawingCut = false; }
+    if (WasInputKeyJustPressed(EKeys::One)) { bGrabMode = false; bBlastMode = false; bJoinMode = false; bImpactMode = false; bRepairMode = false; bCutMode = false; bDrawingCut = false; }
+    if (WasInputKeyJustPressed(EKeys::Two)) { bGrabMode = false; bBlastMode = false; bJoinMode = false; bImpactMode = false; bRepairMode = true; bCutMode = false; bDrawingCut = false; }
+    if (WasInputKeyJustPressed(EKeys::Six)) { bGrabMode = false; bBlastMode = false; bJoinMode = false; bImpactMode = false; bCutMode = true; bDrawingCut = false; }
+    if (WasInputKeyJustPressed(EKeys::Seven)) { bGrabMode = false; bBlastMode = false; bJoinMode = false; bImpactMode = true; bRepairMode = false; bCutMode = false; bDrawingCut = false; }
     if (WasInputKeyJustPressed(EKeys::Eight))
     {
-        bBlastMode = false; bJoinMode = true; bImpactMode = false; bRepairMode = false; bCutMode = false; bDrawingCut = false;
+        bGrabMode = false; bBlastMode = false; bJoinMode = true; bImpactMode = false; bRepairMode = false; bCutMode = false; bDrawingCut = false;
         if (IsValid(TestMonster)) TestMonster->ClearJoinSelection();
         EditStatus = TEXT("接合：戻す破片をクリックし、次に接合先をクリックしてください。");
     }
@@ -127,10 +132,13 @@ void AAp5Observer::PlayerTick(float DeltaTime)
     if (WasInputKeyJustPressed(EKeys::Four)) BrushRadius = 20;
     if (WasInputKeyJustPressed(EKeys::Five)) BrushRadius = 30;
     if (!IsValid(TestMonster)) return;
+    if (!bGrabMode) TestMonster->EndGrab();
     if (WasInputKeyJustPressed(EKeys::Nine))
     {
+        bGrabMode=false;
         bJoinMode=false;
         bDrawingCut=false;
+        TestMonster->EndGrab();
         TestMonster->ClearJoinSelection();
         const bool bEnabled=TestMonster->ToggleArmMotionTest();
         EditStatus=bEnabled
@@ -146,6 +154,26 @@ void AAp5Observer::PlayerTick(float DeltaTime)
     }
     // 案内の上と視点ドラッグ中は加工しない。長押しによる連続加工も行わない。
     const bool bOverHUD = bMouseAvailable && MouseX >= 12 && MouseX <= 1012 && MouseY >= 12 && MouseY <= 146;
+    if (bGrabMode)
+    {
+        FVector GrabStart,GrabDirection;
+        if (WasInputKeyJustPressed(EKeys::LeftMouseButton) && bMouseAvailable && !bDragging && !bOverHUD
+            && DeprojectMousePositionToWorld(GrabStart,GrabDirection))
+        {
+            EditStatus=TestMonster->BeginGrab(GrabStart,GrabDirection);
+        }
+        if (IsInputKeyDown(EKeys::LeftMouseButton) && bMouseAvailable && !bDragging
+            && DeprojectMousePositionToWorld(GrabStart,GrabDirection))
+        {
+            TestMonster->UpdateGrab(GrabStart,GrabDirection);
+        }
+        if (WasInputKeyJustReleased(EKeys::LeftMouseButton))
+        {
+            TestMonster->EndGrab();
+            EditStatus=TEXT("破片を離しました。移動中ならその速度を保って飛びます。");
+        }
+        return;
+    }
     if (bDragging || !bMouseAvailable) bDrawingCut = false;
     if (bDrawingCut)
     {
@@ -206,6 +234,13 @@ bool AAp5Observer::GetJoinMarker(FVector2D& ScreenPosition) const
         && ProjectWorldLocationToScreen(Location, ScreenPosition);
 }
 
+bool AAp5Observer::GetGrabMarker(FVector2D& ScreenPosition) const
+{
+    FVector Location;
+    return bGrabMode && IsValid(TestMonster) && TestMonster->GetGrabLocation(Location)
+        && ProjectWorldLocationToScreen(Location, ScreenPosition);
+}
+
 void AAp5ObserverHUD::DrawHUD()
 {
     Super::DrawHUD();
@@ -213,8 +248,8 @@ void AAp5ObserverHUD::DrawHUD()
     const AAp5Observer* Observer = Cast<AAp5Observer>(GetOwningPlayerController());
     if (Observer == nullptr) return;
     const float DisplayRadius=Observer->IsBlastMode() ? Observer->GetBrushRadius()*1.5f : Observer->GetBrushRadius();
-    DrawText(FString::Printf(TEXT("%s　半径 %.0f cm　0：爆発　7：弾痕　1：貫通穴　2：修復　6：切断　8：接合"),
-        Observer->IsBlastMode() ? TEXT("爆発") : (Observer->IsJoinMode() ? TEXT("接合") : (Observer->IsImpactMode() ? TEXT("弾痕") : (Observer->IsCutMode() ? TEXT("切断") : (Observer->IsRepairMode() ? TEXT("修復") : TEXT("穴あけ"))))),
+    DrawText(FString::Printf(TEXT("%s　半径 %.0f cm　G：把持　0：爆発　7：弾痕　1：貫通穴　2：修復　6：切断　8：接合"),
+        Observer->IsGrabMode() ? TEXT("把持") : (Observer->IsBlastMode() ? TEXT("爆発") : (Observer->IsJoinMode() ? TEXT("接合") : (Observer->IsImpactMode() ? TEXT("弾痕") : (Observer->IsCutMode() ? TEXT("切断") : (Observer->IsRepairMode() ? TEXT("修復") : TEXT("穴あけ")))))),
         DisplayRadius), FColor::White, 24, 20);
     DrawText(TEXT("3：細い　4：標準　5：太い　9：右腕関節動作 ON/OFF　Backspace：現在モードをリセット"), FColor::White, 24, 44);
     DrawText(TEXT("右ドラッグ／矢印：回転　ホイール／PageUp・Down：ズーム　R：視点を戻す　Esc：終了"), FColor::White, 24, 68);
@@ -226,6 +261,13 @@ void AAp5ObserverHUD::DrawHUD()
         DrawLine(JoinMarker.X - 10, JoinMarker.Y, JoinMarker.X + 10, JoinMarker.Y, FLinearColor::Yellow, 2);
         DrawLine(JoinMarker.X, JoinMarker.Y - 10, JoinMarker.X, JoinMarker.Y + 10, FLinearColor::Yellow, 2);
         DrawText(TEXT("接合元"), FColor::Yellow, JoinMarker.X + 12, JoinMarker.Y);
+    }
+    FVector2D GrabMarker;
+    if (Observer->GetGrabMarker(GrabMarker))
+    {
+        DrawLine(GrabMarker.X - 10, GrabMarker.Y, GrabMarker.X + 10, GrabMarker.Y, FLinearColor::Yellow, 2);
+        DrawLine(GrabMarker.X, GrabMarker.Y - 10, GrabMarker.X, GrabMarker.Y + 10, FLinearColor::Yellow, 2);
+        DrawText(TEXT("把持点"), FColor::Yellow, GrabMarker.X + 12, GrabMarker.Y);
     }
     if (Observer->IsDrawingCut())
     {

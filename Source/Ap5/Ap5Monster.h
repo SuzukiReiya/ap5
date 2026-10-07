@@ -7,6 +7,7 @@
 
 class UDynamicMeshComponent;
 class UMaterialInterface;
+class UPhysicsHandleComponent;
 
 // 全身の体積から外皮・内壁・切断面を生成する検証用モンスター。
 UCLASS()
@@ -26,6 +27,10 @@ public:
     FString ApplyJoin(const FVector& Start, const FVector& Direction);
     void ClearJoinSelection() { SelectedJoinPiece = INDEX_NONE; }
     bool GetJoinSelectionLocation(FVector& Location) const;
+    FString BeginGrab(const FVector& Start, const FVector& Direction);
+    void UpdateGrab(const FVector& Start, const FVector& Direction);
+    void EndGrab();
+    bool GetGrabLocation(FVector& Location) const;
     bool ToggleArmMotionTest();
     bool IsArmMotionTestEnabled() const { return bArmMotionTest; }
     double LastEditMilliseconds = 0;
@@ -40,6 +45,9 @@ private:
     void RefreshPieces(const std::vector<int>& Changed);
     void UpdateArmMotion(float DeltaSeconds);
     int32 SelectedJoinPiece = INDEX_NONE;
+    int32 GrabbedPiece = INDEX_NONE;
+    float GrabDistance = 0.0f;
+    FVector GrabTarget = FVector::ZeroVector;
     bool bArmMotionTest = false;
     float ArmMotionTime = 0.0f;
     std::vector<Ap5Volume::Ellipsoid> Shapes;
@@ -48,6 +56,9 @@ private:
 
     UPROPERTY()
     TObjectPtr<UMaterialInterface> GolemMaterial;
+
+    UPROPERTY()
+    TObjectPtr<UPhysicsHandleComponent> FragmentHandle;
 
     UPROPERTY()
     TArray<TObjectPtr<UDynamicMeshComponent>> PieceMeshes;

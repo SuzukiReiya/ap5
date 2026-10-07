@@ -8,6 +8,7 @@
 #include "Materials/Material.h"
 #include "HAL/PlatformTime.h"
 #include "PhysicsEngine/AggregateGeom.h"
+#include "PhysicsEngine/PhysicsHandleComponent.h"
 #include "Math/RotationMatrix.h"
 #include "UObject/ConstructorHelpers.h"
 
@@ -23,6 +24,10 @@ AAp5Monster::AAp5Monster()
     PrimaryActorTick.bStartWithTickEnabled = false;
     PrimaryActorTick.TickGroup = TG_PostPhysics;
     RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("MonsterRoot"));
+    FragmentHandle = CreateDefaultSubobject<UPhysicsHandleComponent>(TEXT("FragmentHandle"));
+    FragmentHandle->SetLinearStiffness(1800.0f);
+    FragmentHandle->SetLinearDamping(220.0f);
+    FragmentHandle->SetInterpolationSpeed(18.0f);
     // 白い基本形状用マテリアルで、外皮と穴の内壁の陰影を見やすくする。
     static ConstructorHelpers::FObjectFinder<UMaterialInterface> MaterialFinder(
         TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
@@ -237,6 +242,56 @@ int32 AAp5Monster::Cut(const FVector& PlanePoint, const FVector& PlaneNormal)
     return Added;
 }
 
+FString AAp5Monster::BeginGrab(const FVector& Start, const FVector& Direction)
+{
+    EndGrab();
+    SyncPhysicsState();
+    const FVector Axis=Direction.GetSafeNormal();
+    if (Axis.IsNearlyZero()) return TEXT("把持できません：視線方向が無効です。");
+    const FVector LocalStart=GetActorTransform().InverseTransformPosition(Start);
+    const FVector LocalDirection=GetActorTransform().InverseTransformVectorNoScale(Axis);
+    double Distance=0;
+    const int32 Target=Pieces.Pick(VolumePoint(LocalStart),VolumePoint(LocalDirection),Distance);
+    if (Target<0) return TEXT("把持対象なし：分離して落ちた破片をクリックしてください。");
+    if (!PieceMeshes.IsValidIndex(Target) || Pieces.Items[Target].Fixed
+        || !PieceMeshes[Target]->IsSimulatingPhysics())
+        return TEXT("固定されている部分は把持できません。切り離した破片を選んでください。");
+
+    GrabbedPiece=Target;
+    GrabDistance=static_cast<float>(Distance);
+    GrabTarget=Start+Axis*GrabDistance;
+    FragmentHandle->GrabComponentAtLocation(PieceMeshes[Target],NAME_None,GrabTarget);
+    PieceMeshes[Target]->WakeAllRigidBodies();
+    UE_LOG(LogTemp, Display, TEXT("AP5_GRAB_BEGIN: index=%d distance_cm=%.1f"),Target,GrabDistance);
+    return TEXT("破片を把持しました。左ボタンを押したまま動かし、勢いを付けて離すと投げられます。");
+}
+
+void AAp5Monster::UpdateGrab(const FVector& Start, const FVector& Direction)
+{
+    if (GrabbedPiece==INDEX_NONE || FragmentHandle==nullptr) return;
+    const FVector Axis=Direction.GetSafeNormal();
+    if (Axis.IsNearlyZero()) return;
+    GrabTarget=Start+Axis*GrabDistance;
+    FragmentHandle->SetTargetLocation(GrabTarget);
+}
+
+void AAp5Monster::EndGrab()
+{
+    if (GrabbedPiece==INDEX_NONE) return;
+    const int32 Released=GrabbedPiece;
+    if (FragmentHandle!=nullptr) FragmentHandle->ReleaseComponent();
+    GrabbedPiece=INDEX_NONE;
+    GrabDistance=0.0f;
+    UE_LOG(LogTemp, Display, TEXT("AP5_GRAB_END: index=%d"),Released);
+}
+
+bool AAp5Monster::GetGrabLocation(FVector& Location) const
+{
+    if (GrabbedPiece==INDEX_NONE) return false;
+    Location=GrabTarget;
+    return true;
+}
+
 bool AAp5Monster::GetJoinSelectionLocation(FVector& Location) const
 {
     if (!PieceMeshes.IsValidIndex(SelectedJoinPiece)) return false;
@@ -361,6 +416,7 @@ bool AAp5Monster::ToggleArmMotionTest()
 
 void AAp5Monster::ResetShape()
 {
+    EndGrab();
     ClearJoinSelection();
     for (UDynamicMeshComponent* Mesh : PieceMeshes) Mesh->DestroyComponent();
     PieceMeshes.Empty();
