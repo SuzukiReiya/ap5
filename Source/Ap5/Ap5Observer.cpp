@@ -108,13 +108,18 @@ void AAp5Observer::PlayerTick(float DeltaTime)
             break;
         }
     }
-    if (WasInputKeyJustPressed(EKeys::One)) { bJoinMode = false; bImpactMode = false; bRepairMode = false; bCutMode = false; bDrawingCut = false; }
-    if (WasInputKeyJustPressed(EKeys::Two)) { bJoinMode = false; bImpactMode = false; bRepairMode = true; bCutMode = false; bDrawingCut = false; }
-    if (WasInputKeyJustPressed(EKeys::Six)) { bJoinMode = false; bImpactMode = false; bCutMode = true; bDrawingCut = false; }
-    if (WasInputKeyJustPressed(EKeys::Seven)) { bJoinMode = false; bImpactMode = true; bRepairMode = false; bCutMode = false; bDrawingCut = false; }
+    if (WasInputKeyJustPressed(EKeys::Zero))
+    {
+        bBlastMode=true; bJoinMode=false; bImpactMode=false; bRepairMode=false; bCutMode=false; bDrawingCut=false;
+        EditStatus=TEXT("爆発：クリック地点を中心に球状破壊し、分離破片を外側へ飛ばします。");
+    }
+    if (WasInputKeyJustPressed(EKeys::One)) { bBlastMode = false; bJoinMode = false; bImpactMode = false; bRepairMode = false; bCutMode = false; bDrawingCut = false; }
+    if (WasInputKeyJustPressed(EKeys::Two)) { bBlastMode = false; bJoinMode = false; bImpactMode = false; bRepairMode = true; bCutMode = false; bDrawingCut = false; }
+    if (WasInputKeyJustPressed(EKeys::Six)) { bBlastMode = false; bJoinMode = false; bImpactMode = false; bCutMode = true; bDrawingCut = false; }
+    if (WasInputKeyJustPressed(EKeys::Seven)) { bBlastMode = false; bJoinMode = false; bImpactMode = true; bRepairMode = false; bCutMode = false; bDrawingCut = false; }
     if (WasInputKeyJustPressed(EKeys::Eight))
     {
-        bJoinMode = true; bImpactMode = false; bRepairMode = false; bCutMode = false; bDrawingCut = false;
+        bBlastMode = false; bJoinMode = true; bImpactMode = false; bRepairMode = false; bCutMode = false; bDrawingCut = false;
         if (IsValid(TestMonster)) TestMonster->ClearJoinSelection();
         EditStatus = TEXT("接合：戻す破片をクリックし、次に接合先をクリックしてください。");
     }
@@ -181,11 +186,15 @@ void AAp5Observer::PlayerTick(float DeltaTime)
                 EditStatus = TestMonster->ApplyJoin(Start, Direction);
                 return;
             }
-            const int32 ChangedSamples = bImpactMode ? TestMonster->ApplyImpact(Start, Direction, BrushRadius)
-                : TestMonster->ApplyBrush(Start, Direction, BrushRadius, bRepairMode);
+            const float EffectiveRadius=bBlastMode ? BrushRadius*1.5f : BrushRadius;
+            const int32 ChangedSamples=bBlastMode
+                ? TestMonster->ApplyBlast(Start,Direction,EffectiveRadius)
+                : (bImpactMode ? TestMonster->ApplyImpact(Start,Direction,BrushRadius)
+                    : TestMonster->ApplyBrush(Start,Direction,BrushRadius,bRepairMode));
             if (ChangedSamples < 0) EditStatus = TEXT("分離上限のため加工しませんでした。Backspaceで全リセットできます。");
             else EditStatus = FString::Printf(TEXT("%s：更新 %d 格子点 / 分離 %d 個 / CPU処理 %.1f ms"),
-                bImpactMode ? TEXT("弾痕") : (bRepairMode ? TEXT("修復") : TEXT("穴あけ")), ChangedSamples, TestMonster->LastSeparatedPieces, TestMonster->LastEditMilliseconds);
+                bBlastMode ? TEXT("爆発") : (bImpactMode ? TEXT("弾痕") : (bRepairMode ? TEXT("修復") : TEXT("穴あけ"))),
+                ChangedSamples, TestMonster->LastSeparatedPieces, TestMonster->LastEditMilliseconds);
         }
     }
 }
@@ -203,9 +212,10 @@ void AAp5ObserverHUD::DrawHUD()
     DrawRect(FLinearColor(0, 0, 0, 0.75f), 12, 12, 1000, 134);
     const AAp5Observer* Observer = Cast<AAp5Observer>(GetOwningPlayerController());
     if (Observer == nullptr) return;
-    DrawText(FString::Printf(TEXT("%s　半径 %.0f cm　7：弾痕　1：貫通穴　2：修復　6：切断　8：接合"),
-        Observer->IsJoinMode() ? TEXT("接合") : (Observer->IsImpactMode() ? TEXT("弾痕") : (Observer->IsCutMode() ? TEXT("切断") : (Observer->IsRepairMode() ? TEXT("修復") : TEXT("穴あけ")))),
-        Observer->GetBrushRadius()), FColor::White, 24, 20);
+    const float DisplayRadius=Observer->IsBlastMode() ? Observer->GetBrushRadius()*1.5f : Observer->GetBrushRadius();
+    DrawText(FString::Printf(TEXT("%s　半径 %.0f cm　0：爆発　7：弾痕　1：貫通穴　2：修復　6：切断　8：接合"),
+        Observer->IsBlastMode() ? TEXT("爆発") : (Observer->IsJoinMode() ? TEXT("接合") : (Observer->IsImpactMode() ? TEXT("弾痕") : (Observer->IsCutMode() ? TEXT("切断") : (Observer->IsRepairMode() ? TEXT("修復") : TEXT("穴あけ"))))),
+        DisplayRadius), FColor::White, 24, 20);
     DrawText(TEXT("3：細い　4：標準　5：太い　9：右腕関節動作 ON/OFF　Backspace：現在モードをリセット"), FColor::White, 24, 44);
     DrawText(TEXT("右ドラッグ／矢印：回転　ホイール／PageUp・Down：ズーム　R：視点を戻す　Esc：終了"), FColor::White, 24, 68);
     DrawText(Observer->GetEditStatus(), FColor::Yellow, 24, 92);

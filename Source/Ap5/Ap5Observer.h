@@ -17,6 +17,7 @@ public:
     virtual void BeginPlay() override;
     virtual void PlayerTick(float DeltaTime) override;
     bool IsJoinMode() const { return bJoinMode; }
+    bool IsBlastMode() const { return bBlastMode; }
     bool GetJoinMarker(FVector2D& ScreenPosition) const;
     bool IsImpactMode() const { return bImpactMode; }
     bool IsRepairMode() const { return bRepairMode; }
@@ -34,6 +35,7 @@ private:
     UPROPERTY()
     TObjectPtr<AAp5Monster> TestMonster;
     bool bJoinMode = false;
+    bool bBlastMode = false;
     bool bImpactMode = true;
     bool bRepairMode = false;
     bool bCutMode = false;

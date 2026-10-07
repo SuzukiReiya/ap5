@@ -175,6 +175,39 @@ public:
         return NewTarget;
     }
 
+    // 球状に材料を除去し、影響を受けて自由になった塊へ放射状の初速度を与える。
+    // 形状変更は上限確認後にまとめて適用するため、途中だけ爆発することはない。
+    int Blast(const Point& Center,double Radius,double Speed,std::vector<int>& Changed,int MaximumPieces=33)
+    {
+        Changed.clear();
+        if (Radius<=0 || Speed<0) return 0;
+        const size_t Before=Items.size();
+        std::vector<std::vector<Field>> Plans(Before);
+        int Total=0, Added=0;
+        for (size_t I=0;I<Before;++I)
+        {
+            Field Edited=Items[I].Volume;
+            const int Count=Edited.Blast(Items[I].ToLocal(Center),Radius);
+            if (Count==0) continue;
+            if (!PrepareEdit(Edited,false,Plans[I])) return -1;
+            Added+=static_cast<int>(Plans[I].size())-1;
+            if (static_cast<int>(Before)+Added>MaximumPieces) return -1;
+            Total+=Count;
+        }
+        for (size_t I=0;I<Before;++I) ApplyParts(I,Plans[I],Changed);
+        for (int Index : Changed)
+        {
+            if (Index<0 || Index>=static_cast<int>(Items.size())) continue;
+            Piece& P=Items[Index];
+            if (P.Fixed || P.Volume.MaterialCount()==0) continue;
+            Point Direction=P.ToWorld(P.Volume.MaterialCentroid())-Center;
+            if (Direction.Length()<1e-9) Direction=Point(0,0,1);
+            P.OriginVelocity=P.OriginVelocity+Direction.Unit()*Speed;
+            P.Motion.Landed=false;
+        }
+        return Total;
+    }
+
     // 手前の塊だけに当てる。次の一発では加工済みの表面を改めて探す。
     int Impact(const Point& Start,const Point& Direction,double Radius,double Depth,std::vector<int>& Changed,int MaximumPieces=33)
     {

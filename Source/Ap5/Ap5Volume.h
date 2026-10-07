@@ -104,6 +104,19 @@ public:
         return Count;
     }
 
+    Point MaterialCentroid() const
+    {
+        Point Sum;
+        int Count=0;
+        for (int Z=0;Z<NZ;++Z) for (int Y=0;Y<NY;++Y) for (int X=0;X<NX;++X)
+        {
+            if (Values[Index(X,Y,Z)]>=0) continue;
+            Sum=Sum+Position(X,Y,Z);
+            ++Count;
+        }
+        return Count>0 ? Sum*(1.0/Count) : Point();
+    }
+
     // 初期形状の最下段の材料を支持点にする。今回のモデルでは足裏付近に相当する。
     std::vector<Point> LowestMaterialPoints() const
     {
@@ -371,6 +384,20 @@ public:
             Previous=T;
         }
         return false;
+    }
+
+    // 球状の空間を材料から差し引く。爆発・局所欠損の基礎演算。
+    int Blast(const Point& Center,double Radius)
+    {
+        if (Radius<=0) return 0;
+        int Changed=0;
+        for (int Z=0;Z<NZ;++Z) for (int Y=0;Y<NY;++Y) for (int X=0;X<NX;++X)
+        {
+            const int I=Index(X,Y,Z);
+            const double Next=std::max(Values[I],Radius-(Position(X,Y,Z)-Center).Length());
+            if (Next-Values[I]>1e-9) { Values[I]=Next; ++Changed; }
+        }
+        return Changed;
     }
 
     // 浅い球面状のくぼみ。深さは射線方向、半径は平らな表面での入口の目安。

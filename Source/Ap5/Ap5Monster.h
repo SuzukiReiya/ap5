@@ -20,6 +20,7 @@ public:
     virtual void Tick(float DeltaSeconds) override;
     int32 ApplyBrush(const FVector& Start, const FVector& Direction, float Radius, bool bRepair);
     int32 ApplyImpact(const FVector& Start, const FVector& Direction, float Radius);
+    int32 ApplyBlast(const FVector& Start, const FVector& Direction, float Radius);
     int32 Cut(const FVector& PlanePoint, const FVector& PlaneNormal);
     void ResetShape();
     FString ApplyJoin(const FVector& Start, const FVector& Direction);
