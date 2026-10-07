@@ -542,7 +542,6 @@ int main()
     int Driven=-1, StaticBody=-1;
     for (size_t I=0;I<Scene.Items.size();++I)
     {
-        std::cout << "爆発診断: 分離後破片 " << I << " の表面を確認\n" << std::flush;
         CheckSurface(Scene.Items[I].Volume);
         if (Scene.Items[I].Driven) Driven=static_cast<int>(I);
         else if (Scene.Items[I].Fixed) StaticBody=static_cast<int>(I);
@@ -595,7 +594,6 @@ int main()
     assert(BlastField.MaterialCount()<BlastBefore);
     assert(BlastField.Sample(Point(35,0,0))>0);
     assert(BlastField.Sample(Point(-20,0,0))<0);
-    std::cout << "爆発診断: 単体球状CSG表面を確認\n" << std::flush;
     CheckSurface(BlastField);
 
     Scene.Reset(Connected,{Point(0,-40,80)});
