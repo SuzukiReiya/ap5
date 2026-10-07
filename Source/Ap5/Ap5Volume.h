@@ -390,11 +390,14 @@ public:
     int Blast(const Point& Center,double Radius)
     {
         if (Radius<=0) return 0;
+        // 半径が格子間隔の整数倍でも等値面が格子点へ厳密一致しないよう微小に広げる。
+        // 見た目・寸法への影響は無視できる一方、Marching Tetrahedraの退化三角形を避けられる。
+        const double EffectiveRadius=Radius+1e-6;
         int Changed=0;
         for (int Z=0;Z<NZ;++Z) for (int Y=0;Y<NY;++Y) for (int X=0;X<NX;++X)
         {
             const int I=Index(X,Y,Z);
-            const double Next=std::max(Values[I],Radius-(Position(X,Y,Z)-Center).Length());
+            const double Next=std::max(Values[I],EffectiveRadius-(Position(X,Y,Z)-Center).Length());
             if (Next-Values[I]>1e-9) { Values[I]=Next; ++Changed; }
         }
         return Changed;
