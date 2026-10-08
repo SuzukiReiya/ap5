@@ -33,6 +33,9 @@ public:
     bool GetGrabLocation(FVector& Location) const;
     bool ToggleArmMotionTest();
     bool IsArmMotionTestEnabled() const { return bArmMotionTest; }
+    bool ToggleMaterialResistanceTest();
+    bool IsMaterialResistanceTestEnabled() const { return bMaterialResistanceTest; }
+    const FString& GetLastImpactMaterialText() const { return LastImpactMaterialText; }
     double LastEditMilliseconds = 0;
     int32 LastSeparatedPieces = 0;
 
@@ -44,11 +47,14 @@ private:
     void SyncPhysicsState();
     void RefreshPieces(const std::vector<int>& Changed);
     void UpdateArmMotion(float DeltaSeconds);
+    double ImpactResistanceAt(const Ap5Volume::Point& LocalHit, FString& MaterialName) const;
     int32 SelectedJoinPiece = INDEX_NONE;
     int32 GrabbedPiece = INDEX_NONE;
     float GrabDistance = 0.0f;
     FVector GrabTarget = FVector::ZeroVector;
     bool bArmMotionTest = false;
+    bool bMaterialResistanceTest = false;
+    FString LastImpactMaterialText = TEXT("材質差OFF：標準 深さ8.0 cm");
     float ArmMotionTime = 0.0f;
     std::vector<Ap5Volume::Ellipsoid> Shapes;
     Ap5Volume::Field InitialVolume;

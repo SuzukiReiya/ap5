@@ -132,6 +132,13 @@ void AAp5Observer::PlayerTick(float DeltaTime)
     if (WasInputKeyJustPressed(EKeys::Four)) BrushRadius = 20;
     if (WasInputKeyJustPressed(EKeys::Five)) BrushRadius = 30;
     if (!IsValid(TestMonster)) return;
+    if (WasInputKeyJustPressed(EKeys::M))
+    {
+        const bool bEnabled=TestMonster->ToggleMaterialResistanceTest();
+        EditStatus=bEnabled
+            ? TEXT("材質差ON：弾痕7で比較。腕・脚=標準、胴体=硬質x2、頭=硬質x4。")
+            : TEXT("材質差OFF：弾痕は全身とも標準深さ8 cmです。");
+    }
     if (!bGrabMode) TestMonster->EndGrab();
     if (WasInputKeyJustPressed(EKeys::Nine))
     {
@@ -220,8 +227,12 @@ void AAp5Observer::PlayerTick(float DeltaTime)
                 : (bImpactMode ? TestMonster->ApplyImpact(Start,Direction,BrushRadius)
                     : TestMonster->ApplyBrush(Start,Direction,BrushRadius,bRepairMode));
             if (ChangedSamples < 0) EditStatus = TEXT("分離上限のため加工しませんでした。Backspaceで全リセットできます。");
+            else if (bImpactMode) EditStatus = FString::Printf(
+                TEXT("弾痕：更新 %d 格子点 / 分離 %d 個 / CPU処理 %.1f ms / %s"),
+                ChangedSamples,TestMonster->LastSeparatedPieces,TestMonster->LastEditMilliseconds,
+                *TestMonster->GetLastImpactMaterialText());
             else EditStatus = FString::Printf(TEXT("%s：更新 %d 格子点 / 分離 %d 個 / CPU処理 %.1f ms"),
-                bBlastMode ? TEXT("爆発") : (bImpactMode ? TEXT("弾痕") : (bRepairMode ? TEXT("修復") : TEXT("穴あけ"))),
+                bBlastMode ? TEXT("爆発") : (bRepairMode ? TEXT("修復") : TEXT("穴あけ")),
                 ChangedSamples, TestMonster->LastSeparatedPieces, TestMonster->LastEditMilliseconds);
         }
     }
@@ -251,7 +262,7 @@ void AAp5ObserverHUD::DrawHUD()
     DrawText(FString::Printf(TEXT("%s　半径 %.0f cm　G：把持　0：爆発　7：弾痕　1：貫通穴　2：修復　6：切断　8：接合"),
         Observer->IsGrabMode() ? TEXT("把持") : (Observer->IsBlastMode() ? TEXT("爆発") : (Observer->IsJoinMode() ? TEXT("接合") : (Observer->IsImpactMode() ? TEXT("弾痕") : (Observer->IsCutMode() ? TEXT("切断") : (Observer->IsRepairMode() ? TEXT("修復") : TEXT("穴あけ")))))),
         DisplayRadius), FColor::White, 24, 20);
-    DrawText(TEXT("3：細い　4：標準　5：太い　9：右腕関節動作 ON/OFF　Backspace：現在モードをリセット"), FColor::White, 24, 44);
+    DrawText(TEXT("3：細い　4：標準　5：太い　M：材質差 ON/OFF　9：右腕関節動作　Backspace：リセット"), FColor::White, 24, 44);
     DrawText(TEXT("右ドラッグ／矢印：回転　ホイール／PageUp・Down：ズーム　R：視点を戻す　Esc：終了"), FColor::White, 24, 68);
     DrawText(Observer->GetEditStatus(), FColor::Yellow, 24, 92);
     DrawText(TEXT("つながりを削り切ると分離・落下。本体・破片とも加工可能。修復は直近の分離・接合時の形まで。"), FColor::White, 24, 116);

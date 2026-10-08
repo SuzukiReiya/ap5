@@ -184,22 +184,72 @@ int32 AAp5Monster::ApplyBrush(const FVector& Start, const FVector& Direction, fl
     return Samples;
 }
 
+double AAp5Monster::ImpactResistanceAt(const Ap5Volume::Point& LocalHit, FString& MaterialName) const
+{
+    if (!bMaterialResistanceTest)
+    {
+        MaterialName=TEXT("標準");
+        return 1.0;
+    }
+    // 検証用の空間材質マップ。破片化・回転後も元の局所座標で同じ材質を維持する。
+    if (LocalHit.Z>=250.0)
+    {
+        MaterialName=TEXT("頭部硬質");
+        return 4.0;
+    }
+    if (LocalHit.Z>=145.0 && LocalHit.Z<250.0 && FMath::Abs(LocalHit.Y)<=60.0)
+    {
+        MaterialName=TEXT("胴体硬質");
+        return 2.0;
+    }
+    MaterialName=TEXT("標準");
+    return 1.0;
+}
+
+bool AAp5Monster::ToggleMaterialResistanceTest()
+{
+    bMaterialResistanceTest=!bMaterialResistanceTest;
+    LastImpactMaterialText=bMaterialResistanceTest
+        ? TEXT("材質差ON：腕・脚=標準 / 胴体=x2 / 頭=x4")
+        : TEXT("材質差OFF：全身標準 深さ8.0 cm");
+    UE_LOG(LogTemp, Display, TEXT("AP5_MATERIAL_TEST: enabled=%d"),bMaterialResistanceTest ? 1 : 0);
+    return bMaterialResistanceTest;
+}
+
 int32 AAp5Monster::ApplyImpact(const FVector& Start, const FVector& Direction, float Radius)
 {
     const double Started = FPlatformTime::Seconds();
     SyncPhysicsState();
     const FVector LocalStart = GetActorTransform().InverseTransformPosition(Start);
-    const FVector LocalDirection = GetActorTransform().InverseTransformVectorNoScale(Direction);
+    const FVector LocalDirection = GetActorTransform().InverseTransformVectorNoScale(Direction).GetSafeNormal();
+    if (LocalDirection.IsNearlyZero()) return 0;
+
+    double Resistance=1.0;
+    double Depth=8.0;
+    FString MaterialName=TEXT("標準");
+    double HitDistance=0;
+    const int32 Target=Pieces.Pick(VolumePoint(LocalStart),VolumePoint(LocalDirection),HitDistance);
+    if (Target>=0)
+    {
+        const Ap5Volume::Point Hit=Pieces.Items[Target].ToLocal(
+            VolumePoint(LocalStart)+VolumePoint(LocalDirection)*HitDistance);
+        Resistance=ImpactResistanceAt(Hit,MaterialName);
+        Depth=8.0/Resistance;
+    }
+    LastImpactMaterialText=FString::Printf(TEXT("%s x%.1f / 深さ %.1f cm"),
+        *MaterialName,Resistance,Depth);
+
     const int32 Before = static_cast<int32>(Pieces.Items.size());
     std::vector<int> Changed;
     const int32 Samples = Pieces.Impact(
-        Ap5Volume::Point(LocalStart.X, LocalStart.Y, LocalStart.Z),
-        Ap5Volume::Point(LocalDirection.X, LocalDirection.Y, LocalDirection.Z), Radius, 8.0, Changed);
+        VolumePoint(LocalStart),VolumePoint(LocalDirection),Radius,Depth,Changed);
     LastSeparatedPieces = static_cast<int32>(Pieces.Items.size()) - Before;
     if (!Changed.empty()) RefreshPieces(Changed);
     LastEditMilliseconds = (FPlatformTime::Seconds() - Started) * 1000;
-    UE_LOG(LogTemp, Display, TEXT("AP5_IMPACT: radius_cm=%.0f depth_cm=8 samples=%d pieces=%d separated=%d cpu_ms=%.2f"),
-        Radius, Samples, static_cast<int32>(Changed.size()), LastSeparatedPieces, LastEditMilliseconds);
+    UE_LOG(LogTemp, Display,
+        TEXT("AP5_IMPACT: radius_cm=%.0f depth_cm=%.1f resistance=%.1f material=%s samples=%d pieces=%d separated=%d cpu_ms=%.2f"),
+        Radius,Depth,Resistance,*MaterialName,Samples,static_cast<int32>(Changed.size()),
+        LastSeparatedPieces,LastEditMilliseconds);
     return Samples;
 }
 
