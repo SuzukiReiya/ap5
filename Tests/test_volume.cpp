@@ -261,6 +261,24 @@ int main()
     assert(Scene.ImpactAt(0,Point(-40,1,2),ShotDirection,20,8,Changed)>0);
     assert(!Changed.empty() && Changed[0]==0);
     assert(Scene.Items[0].Volume.MaterialCount()<DirectBefore);
+
+    // 球形弾の補助スイープ：中心線が二つの塊の隙間を通っても、弾半径内なら命中する。
+    Ap5Volume::Ellipsoid SweepTop,SweepBottom;
+    SweepTop.Center=Point(0,12,0); SweepTop.Radii=Point(30,7,25);
+    SweepBottom=SweepTop; SweepBottom.Center.Y=-12;
+    Field SweepTopField,SweepBottomField;
+    SweepTopField.InitializeUnion({SweepTop});
+    SweepBottomField.InitializeUnion({SweepBottom});
+    Ap5Volume::PieceCollection SweepScene;
+    Ap5Volume::Piece SweepA,SweepB;
+    SweepA.Volume=SweepTopField; SweepB.Volume=SweepBottomField;
+    SweepScene.Items.push_back(SweepA);
+    SweepScene.Items.push_back(SweepB);
+    double SweepDistance=0;
+    assert(SweepScene.Pick(Point(-100,0,0),Point(1,0,0),SweepDistance)==-1);
+    Point SweepHit;
+    assert(SweepScene.PickSwept(Point(-100,0,0),Point(100,0,0),8,SweepDistance,SweepHit)>=0);
+    assert(SweepDistance<200);
     // 逆方向と不正な射線。
     assert(TargetVolume.Trace(Point(200,1,2),Point(-1,0,0),4000,BeforeHit));
     assert(!TargetVolume.Trace(ShotStart,Point(),4000,BeforeHit));
