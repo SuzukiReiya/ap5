@@ -19,6 +19,7 @@ const TCHAR* ProcessNames[] =
     TEXT("衝突更新"),
     TEXT("物理ボディ設定"),
     TEXT("コンポーネント生成"),
+    TEXT("プロファイラI/O"),
     TEXT("その他（未計測）")
 };
 static_assert(UE_ARRAY_COUNT(ProcessNames) == static_cast<int32>(EAp5ProfileProcess::Count));
@@ -30,51 +31,48 @@ FAp5FrameProfiler& FAp5FrameProfiler::Get()
     return Instance;
 }
 
-void FAp5FrameProfiler::BeginFrame(float DeltaSeconds)
+void FAp5FrameProfiler::BeginFrame()
 {
-    MoveToFrame(GFrameCounter);
-    CurrentFrameMilliseconds = FMath::Max(0.0, static_cast<double>(DeltaSeconds) * 1000.0);
+    const double Now=FPlatformTime::Seconds();
+    if (!bStarted)
+    {
+        // BeginPlay等、計測開始前に発生した処理は初回フレーム統計へ混ぜない。
+        for (double& Value : CurrentMilliseconds) Value=0.0;
+        PreviousFrameBoundarySeconds=Now;
+        bStarted=true;
+        return;
+    }
+
+    const double FrameMilliseconds=(Now-PreviousFrameBoundarySeconds)*1000.0;
+    FinalizeCurrentFrame(FrameMilliseconds);
+    for (double& Value : CurrentMilliseconds) Value=0.0;
+    PreviousFrameBoundarySeconds=Now;
 
     ++FramesSinceWrite;
     if (FramesSinceWrite >= FileWriteIntervalFrames)
     {
         WriteSummaryIfNeeded();
-        FramesSinceWrite = 0;
+        FramesSinceWrite=0;
     }
 }
 
 void FAp5FrameProfiler::AddMilliseconds(EAp5ProfileProcess Process, double Milliseconds)
 {
-    MoveToFrame(GFrameCounter);
-    const int32 Index = static_cast<int32>(Process);
-    if (Index < 0 || Index >= static_cast<int32>(EAp5ProfileProcess::Count)) return;
-    CurrentMilliseconds[Index] += FMath::Max(0.0, Milliseconds);
+    if (!bStarted) return;
+    const int32 Index=static_cast<int32>(Process);
+    if (Index<0 || Index>=static_cast<int32>(EAp5ProfileProcess::Count)) return;
+    CurrentMilliseconds[Index]+=FMath::Max(0.0,Milliseconds);
 }
 
-void FAp5FrameProfiler::MoveToFrame(uint64 FrameNumber)
+void FAp5FrameProfiler::FinalizeCurrentFrame(double FrameMilliseconds)
 {
-    if (CurrentFrame == TNumericLimits<uint64>::Max())
-    {
-        CurrentFrame = FrameNumber;
-        return;
-    }
-    if (CurrentFrame == FrameNumber) return;
-
-    FinalizeCurrentFrame();
-    CurrentFrame = FrameNumber;
-    CurrentFrameMilliseconds = 0.0;
-    for (double& Value : CurrentMilliseconds) Value = 0.0;
-}
-
-void FAp5FrameProfiler::FinalizeCurrentFrame()
-{
-    if (CurrentFrameMilliseconds <= SlowFrameThresholdMilliseconds) return;
+    if (FrameMilliseconds <= SlowFrameThresholdMilliseconds) return;
 
     double MeasuredMilliseconds = 0.0;
     const int32 UnmeasuredIndex = static_cast<int32>(EAp5ProfileProcess::Unmeasured);
     for (int32 I = 0; I < UnmeasuredIndex; ++I) MeasuredMilliseconds += CurrentMilliseconds[I];
     CurrentMilliseconds[UnmeasuredIndex] =
-        FMath::Max(0.0, CurrentFrameMilliseconds - MeasuredMilliseconds);
+        FMath::Max(0.0,FrameMilliseconds-MeasuredMilliseconds);
 
     ++SlowFrameCount;
     for (int32 I = 0; I < static_cast<int32>(EAp5ProfileProcess::Count); ++I)
@@ -101,9 +99,12 @@ void FAp5FrameProfiler::WriteSummaryIfNeeded()
             ProcessNames[I], Average, Minimum, Summary[I].MaxMilliseconds);
     }
 
-    const FString Path = FPaths::Combine(FPaths::ProjectLogDir(), TEXT("Ap5SlowFrameProfile.csv"));
-    if (FFileHelper::SaveStringToFile(Text, *Path))
-        bSummaryDirty = false;
+    const FString Path=FPaths::Combine(FPaths::ProjectLogDir(),TEXT("Ap5SlowFrameProfile.csv"));
+    const double IoStarted=FPlatformTime::Seconds();
+    const bool bSaved=FFileHelper::SaveStringToFile(Text,*Path);
+    const double IoMilliseconds=(FPlatformTime::Seconds()-IoStarted)*1000.0;
+    CurrentMilliseconds[static_cast<int32>(EAp5ProfileProcess::ProfilerIO)]+=IoMilliseconds;
+    if (bSaved) bSummaryDirty=false;
 }
 
 FAp5ProfileScope::FAp5ProfileScope(EAp5ProfileProcess InProcess)
