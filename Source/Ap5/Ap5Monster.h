@@ -53,7 +53,6 @@ private:
     void SyncPhysicsState();
     void RefreshPieces(const std::vector<int>& Changed);
     void UpdateArmMotion(float DeltaSeconds);
-    void RecordProjectileSweepProfile(double Started, bool bBroadphaseRejected);
     double ImpactResistanceAt(const Ap5Volume::Point& LocalHit, FString& MaterialName) const;
     int32 SelectedJoinPiece = INDEX_NONE;
     int32 GrabbedPiece = INDEX_NONE;
@@ -63,11 +62,6 @@ private:
     bool bMaterialResistanceTest = false;
     FString LastImpactMaterialText = TEXT("材質差OFF：標準 深さ8.0 cm");
     float ArmMotionTime = 0.0f;
-    double SweepProfileTotalMilliseconds = 0.0;
-    double SweepProfileMaxMilliseconds = 0.0;
-    double SweepProfileLastLogSeconds = 0.0;
-    int32 SweepProfileCalls = 0;
-    int32 SweepProfileBroadphaseRejects = 0;
     std::vector<Ap5Volume::Ellipsoid> Shapes;
     Ap5Volume::Field InitialVolume;
     Ap5Volume::PieceCollection Pieces;
