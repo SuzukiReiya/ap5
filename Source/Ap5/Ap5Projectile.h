@@ -16,7 +16,8 @@ class AP5_API AAp5Projectile : public AActor
 
 public:
     AAp5Projectile();
-    void Launch(const FVector& Direction, float InImpactRadius);
+    virtual void Tick(float DeltaSeconds) override;
+    void Launch(const FVector& Direction, float InImpactRadius, bool bInExplosive, float InExplosionRadius);
 
 private:
     UFUNCTION()
@@ -33,5 +34,9 @@ private:
     TObjectPtr<UProjectileMovementComponent> Movement;
 
     float ImpactRadius = 20.0f;
+    float ExplosionRadius = 30.0f;
+    bool bExplosive = false;
+    bool bResolved = false;
     FVector FlightDirection = FVector::ForwardVector;
+    FVector PreviousLocation = FVector::ZeroVector;
 };
