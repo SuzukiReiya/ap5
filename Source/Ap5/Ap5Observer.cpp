@@ -1,4 +1,5 @@
 #include "Ap5Observer.h"
+#include "Ap5FrameProfiler.h"
 #include "Ap5Monster.h"
 #include "Ap5Projectile.h"
 #include "EngineUtils.h"
@@ -65,6 +66,7 @@ bool AAp5Observer::FireProjectile(bool bExplosive)
     const FVector Axis=Direction.GetSafeNormal();
     if (Axis.IsNearlyZero()) return false;
 
+    FAp5ProfileScope Profile(EAp5ProfileProcess::ProjectileSpawn);
     FActorSpawnParameters Parameters;
     Parameters.SpawnCollisionHandlingOverride=ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
     AAp5Projectile* Projectile=GetWorld()->SpawnActor<AAp5Projectile>(
@@ -78,6 +80,7 @@ bool AAp5Observer::FireProjectile(bool bExplosive)
 void AAp5Observer::PlayerTick(float DeltaTime)
 {
     Super::PlayerTick(DeltaTime);
+    FAp5FrameProfiler::Get().BeginFrame(DeltaTime);
     if (!IsLocalController() || ObservationCamera == nullptr)
     {
         return;
