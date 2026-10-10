@@ -34,6 +34,7 @@ public:
 private:
     void ResetView();
     void UpdateView();
+    bool FireProjectile(bool bExplosive);
     UPROPERTY()
     TObjectPtr<ACameraActor> ObservationCamera;
     UPROPERTY()
@@ -49,6 +50,7 @@ private:
     FVector2D CutStart = FVector2D::ZeroVector;
     FVector2D CutEnd = FVector2D::ZeroVector;
     float BrushRadius = 20.0f;
+    float FireCooldown = 0.0f;
     FString EditStatus = TEXT("体にカーソルを合わせて左クリックしてください");
     float Yaw = 210.0f;
     float Elevation = 12.0f;
