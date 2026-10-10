@@ -77,10 +77,11 @@ void FAp5FrameProfiler::FinalizeCurrentFrame(double FrameMilliseconds)
     ++SlowFrameCount;
     for (int32 I = 0; I < static_cast<int32>(EAp5ProfileProcess::Count); ++I)
     {
-        const double Value = CurrentMilliseconds[I];
-        Summary[I].SumMilliseconds += Value;
-        Summary[I].MinMilliseconds = FMath::Min(Summary[I].MinMilliseconds, Value);
-        Summary[I].MaxMilliseconds = FMath::Max(Summary[I].MaxMilliseconds, Value);
+        const double Value=CurrentMilliseconds[I];
+        Summary[I].AverageMilliseconds +=
+            (Value-Summary[I].AverageMilliseconds)/static_cast<double>(SlowFrameCount);
+        Summary[I].MinMilliseconds=FMath::Min(Summary[I].MinMilliseconds,Value);
+        Summary[I].MaxMilliseconds=FMath::Max(Summary[I].MaxMilliseconds,Value);
     }
     bSummaryDirty = true;
 }
@@ -92,11 +93,10 @@ void FAp5FrameProfiler::WriteSummaryIfNeeded()
     FString Text = TEXT("処理,平均_ms,最小_ms,最大_ms\n");
     for (int32 I = 0; I < static_cast<int32>(EAp5ProfileProcess::Count); ++I)
     {
-        const double Average = Summary[I].SumMilliseconds / static_cast<double>(SlowFrameCount);
-        const double Minimum = Summary[I].MinMilliseconds == TNumericLimits<double>::Max()
+        const double Minimum=Summary[I].MinMilliseconds==TNumericLimits<double>::Max()
             ? 0.0 : Summary[I].MinMilliseconds;
-        Text += FString::Printf(TEXT("%s,%.3f,%.3f,%.3f\n"),
-            ProcessNames[I], Average, Minimum, Summary[I].MaxMilliseconds);
+        Text+=FString::Printf(TEXT("%s,%.3f,%.3f,%.3f\n"),
+            ProcessNames[I],Summary[I].AverageMilliseconds,Minimum,Summary[I].MaxMilliseconds);
     }
 
     const FString Path=FPaths::Combine(FPaths::ProjectLogDir(),TEXT("Ap5SlowFrameProfile.csv"));
