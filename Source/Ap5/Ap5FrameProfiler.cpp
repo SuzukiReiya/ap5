@@ -17,7 +17,9 @@ const TCHAR* ProcessNames[] =
     TEXT("Mesh反映"),
     TEXT("衝突箱生成"),
     TEXT("衝突更新"),
-    TEXT("物理ボディ設定"),
+    TEXT("物理衝突状態設定"),
+    TEXT("物理Simulation切替"),
+    TEXT("物理速度復元"),
     TEXT("コンポーネント生成"),
     TEXT("プロファイラI/O"),
     TEXT("その他（未計測）")
