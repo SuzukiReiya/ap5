@@ -81,7 +81,8 @@ UDynamicMeshComponent* AAp5Monster::CreatePiece()
     Piece->SetupAttachment(RootComponent);
     Piece->SetMobility(EComponentMobility::Movable);
     Piece->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-    Piece->bUseAsyncCooking = false;
+    // 連射時に単純衝突の再Cookでゲームスレッドを止めない。
+    Piece->bUseAsyncCooking = true;
     Piece->SetComplexAsSimpleCollisionEnabled(false, false);
     Piece->CollisionType = CTF_UseSimpleAsComplex;
     Piece->SetDeferredCollisionUpdatesEnabled(true, false);
@@ -95,11 +96,17 @@ UDynamicMeshComponent* AAp5Monster::CreatePiece()
 
 void AAp5Monster::RebuildMesh(int32 Index)
 {
+    const double TotalStarted=FPlatformTime::Seconds();
     Ap5Volume::Piece& State = Pieces.Items[Index];
     UDynamicMeshComponent* Component = PieceMeshes[Index];
     Component->SetSimulatePhysics(false);
     Component->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+
+    const double SurfaceStarted=FPlatformTime::Seconds();
     const std::vector<Ap5Volume::Triangle> Surface = State.RebuildSurface();
+    const double SurfaceMs=(FPlatformTime::Seconds()-SurfaceStarted)*1000.0;
+
+    const double MeshBuildStarted=FPlatformTime::Seconds();
     UE::Geometry::FDynamicMesh3 Mesh;
     Mesh.EnableAttributes();
     for (const Ap5Volume::Triangle& Face : Surface)
@@ -119,11 +126,17 @@ void AAp5Monster::RebuildMesh(int32 Index)
         Mesh.Attributes()->PrimaryNormals()->SetTriangle(Triangle,
             UE::Geometry::FIndex3i(Normals[0], Normals[1], Normals[2]));
     }
+    const double MeshBuildMs=(FPlatformTime::Seconds()-MeshBuildStarted)*1000.0;
+
+    const double SetMeshStarted=FPlatformTime::Seconds();
     Component->SetMesh(MoveTemp(Mesh));
+    const double SetMeshMs=(FPlatformTime::Seconds()-SetMeshStarted)*1000.0;
+
     const FQuat Rotation = FRotationMatrix::MakeFromXY(EnginePoint(State.AxisX), EnginePoint(State.AxisY)).ToQuat();
     const FTransform LocalTransform(Rotation, EnginePoint(State.ToWorld(Ap5Volume::Point())));
-    // 物理開始時に親から外れるため、再加工時はワールド変換を明示的に復元する。
     Component->SetWorldTransform(LocalTransform * GetActorTransform(), false, nullptr, ETeleportType::TeleportPhysics);
+
+    const double CollisionBoxesStarted=FPlatformTime::Seconds();
     FKAggregateGeom Collision;
     const std::vector<Ap5Volume::CollisionBox> Boxes = State.Volume.CollisionBoxes();
     for (const Ap5Volume::CollisionBox& Box : Boxes)
@@ -135,8 +148,13 @@ void AAp5Monster::RebuildMesh(int32 Index)
         Element.Z = static_cast<float>(Box.Size.Z);
         Collision.BoxElems.Add(Element);
     }
+    const double CollisionBoxesMs=(FPlatformTime::Seconds()-CollisionBoxesStarted)*1000.0;
+
+    const double CollisionUpdateStarted=FPlatformTime::Seconds();
     Component->SetSimpleCollisionShapes(Collision, false);
     Component->UpdateCollision(false);
+    const double CollisionUpdateMs=(FPlatformTime::Seconds()-CollisionUpdateStarted)*1000.0;
+
     if (!Boxes.empty())
     {
         Component->SetCollisionObjectType(State.Fixed
@@ -153,9 +171,14 @@ void AAp5Monster::RebuildMesh(int32 Index)
             Component->WakeAllRigidBodies();
         }
     }
+    const double TotalMs=(FPlatformTime::Seconds()-TotalStarted)*1000.0;
     UE_LOG(LogTemp, Display, TEXT("AP5_COLLISION: index=%d boxes=%d fixed=%d driven=%d simulated=%d"),
         Index, static_cast<int32>(Boxes.size()), State.Fixed ? 1 : 0, State.Driven ? 1 : 0,
         Component->IsSimulatingPhysics() ? 1 : 0);
+    UE_LOG(LogTemp, Display,
+        TEXT("AP5_REBUILD_PROFILE: index=%d triangles=%d boxes=%d surface_ms=%.2f mesh_build_ms=%.2f set_mesh_ms=%.2f collision_boxes_ms=%.2f collision_update_ms=%.2f total_ms=%.2f"),
+        Index,static_cast<int32>(Surface.size()),static_cast<int32>(Boxes.size()),SurfaceMs,MeshBuildMs,
+        SetMeshMs,CollisionBoxesMs,CollisionUpdateMs,TotalMs);
 }
 
 void AAp5Monster::RefreshPieces(const std::vector<int>& Changed)
@@ -278,10 +301,14 @@ int32 AAp5Monster::ApplyProjectileHit(UPrimitiveComponent* HitComponent, const F
 
     const int32 Before=static_cast<int32>(Pieces.Items.size());
     std::vector<int> Changed;
+    const double VolumeEditStarted=FPlatformTime::Seconds();
     const int32 Samples=Pieces.ImpactAt(Target,VolumePoint(LocalHit),VolumePoint(LocalDirection),
         Radius,Depth,Changed);
+    const double VolumeEditMs=(FPlatformTime::Seconds()-VolumeEditStarted)*1000.0;
     LastSeparatedPieces=static_cast<int32>(Pieces.Items.size())-Before;
+    const double RefreshStarted=FPlatformTime::Seconds();
     if (!Changed.empty()) RefreshPieces(Changed);
+    const double RefreshMs=(FPlatformTime::Seconds()-RefreshStarted)*1000.0;
 
     // 加工で分離した場合も、命中点の直後にある自由破片へ運動量を渡す。
     double Nearest=0;
@@ -296,8 +323,9 @@ int32 AAp5Monster::ApplyProjectileHit(UPrimitiveComponent* HitComponent, const F
 
     LastEditMilliseconds=(FPlatformTime::Seconds()-Started)*1000;
     UE_LOG(LogTemp, Display,
-        TEXT("AP5_PROJECTILE_HIT: target=%d radius_cm=%.0f depth_cm=%.1f resistance=%.1f material=%s impulse=%.0f samples=%d separated=%d cpu_ms=%.2f"),
-        Target,Radius,Depth,Resistance,*MaterialName,ImpulseStrength,Samples,LastSeparatedPieces,LastEditMilliseconds);
+        TEXT("AP5_PROJECTILE_HIT: target=%d radius_cm=%.0f depth_cm=%.1f resistance=%.1f material=%s impulse=%.0f samples=%d separated=%d volume_edit_ms=%.2f refresh_ms=%.2f cpu_ms=%.2f"),
+        Target,Radius,Depth,Resistance,*MaterialName,ImpulseStrength,Samples,LastSeparatedPieces,
+        VolumeEditMs,RefreshMs,LastEditMilliseconds);
     return Samples;
 }
 
@@ -311,30 +339,90 @@ int32 AAp5Monster::ApplyProjectileBlast(const FVector& HitPoint, const FVector& 
     const FVector Center=LocalHit+LocalDirection*Radius*0.25f;
     const int32 Before=static_cast<int32>(Pieces.Items.size());
     std::vector<int> Changed;
+    const double VolumeEditStarted=FPlatformTime::Seconds();
     const int32 Samples=Pieces.Blast(VolumePoint(Center),Radius,550.0,Changed);
+    const double VolumeEditMs=(FPlatformTime::Seconds()-VolumeEditStarted)*1000.0;
     LastSeparatedPieces=static_cast<int32>(Pieces.Items.size())-Before;
+    const double RefreshStarted=FPlatformTime::Seconds();
     if (!Changed.empty()) RefreshPieces(Changed);
+    const double RefreshMs=(FPlatformTime::Seconds()-RefreshStarted)*1000.0;
     LastEditMilliseconds=(FPlatformTime::Seconds()-Started)*1000;
     UE_LOG(LogTemp,Display,
-        TEXT("AP5_PROJECTILE_BLAST: radius_cm=%.0f samples=%d changed=%d separated=%d total=%d cpu_ms=%.2f"),
+        TEXT("AP5_PROJECTILE_BLAST: radius_cm=%.0f samples=%d changed=%d separated=%d total=%d volume_edit_ms=%.2f refresh_ms=%.2f cpu_ms=%.2f"),
         Radius,Samples,static_cast<int32>(Changed.size()),LastSeparatedPieces,
-        static_cast<int32>(Pieces.Items.size()),LastEditMilliseconds);
+        static_cast<int32>(Pieces.Items.size()),VolumeEditMs,RefreshMs,LastEditMilliseconds);
     return Samples;
+}
+
+void AAp5Monster::RecordProjectileSweepProfile(double Started, bool bBroadphaseRejected)
+{
+    const double ElapsedMs=(FPlatformTime::Seconds()-Started)*1000.0;
+    SweepProfileTotalMilliseconds+=ElapsedMs;
+    SweepProfileMaxMilliseconds=FMath::Max(SweepProfileMaxMilliseconds,ElapsedMs);
+    ++SweepProfileCalls;
+    if (bBroadphaseRejected) ++SweepProfileBroadphaseRejects;
+
+    const double Now=FPlatformTime::Seconds();
+    if (SweepProfileLastLogSeconds<=0.0) SweepProfileLastLogSeconds=Now;
+    if (Now-SweepProfileLastLogSeconds<1.0) return;
+
+    UE_LOG(LogTemp,Display,
+        TEXT("AP5_PROJECTILE_SWEEP_PROFILE: calls=%d broadphase_rejects=%d avg_ms=%.3f max_ms=%.3f pieces=%d"),
+        SweepProfileCalls,SweepProfileBroadphaseRejects,
+        SweepProfileCalls>0 ? SweepProfileTotalMilliseconds/SweepProfileCalls : 0.0,
+        SweepProfileMaxMilliseconds,static_cast<int32>(Pieces.Items.size()));
+    SweepProfileTotalMilliseconds=0.0;
+    SweepProfileMaxMilliseconds=0.0;
+    SweepProfileCalls=0;
+    SweepProfileBroadphaseRejects=0;
+    SweepProfileLastLogSeconds=Now;
 }
 
 bool AAp5Monster::ApplyProjectileSweep(const FVector& Start, const FVector& End, float SweepRadius,
     float ImpactRadius, bool bExplosive, float ExplosionRadius, float ImpulseStrength)
 {
+    const double Started=FPlatformTime::Seconds();
+    if ((End-Start).IsNearlyZero())
+    {
+        RecordProjectileSweepProfile(Started,true);
+        return false;
+    }
+
+    // ほとんどの飛翔フレームはモンスターから遠い。まずUEのBoundsだけで安価に除外し、
+    // 近傍に来たフレームだけ9本の体積レイへ進む。
+    FBox SegmentBounds(ForceInit);
+    SegmentBounds+=Start;
+    SegmentBounds+=End;
+    SegmentBounds=SegmentBounds.ExpandBy(SweepRadius);
+    bool bNearAnyPiece=false;
+    for (UDynamicMeshComponent* Component : PieceMeshes)
+    {
+        if (IsValid(Component) && SegmentBounds.Intersect(Component->Bounds.GetBox()))
+        {
+            bNearAnyPiece=true;
+            break;
+        }
+    }
+    if (!bNearAnyPiece)
+    {
+        RecordProjectileSweepProfile(Started,true);
+        return false;
+    }
+
+    // 移動破片の姿勢同期も、近傍へ来た弾に対してだけ実施する。
     SyncPhysicsState();
     const FVector LocalStart=GetActorTransform().InverseTransformPosition(Start);
     const FVector LocalEnd=GetActorTransform().InverseTransformPosition(End);
-    if ((LocalEnd-LocalStart).IsNearlyZero()) return false;
 
     double Nearest=0;
     Ap5Volume::Point Hit;
     const int32 Target=Pieces.PickSwept(
         VolumePoint(LocalStart),VolumePoint(LocalEnd),SweepRadius,Nearest,Hit);
-    if (Target<0 || !PieceMeshes.IsValidIndex(Target)) return false;
+    if (Target<0 || !PieceMeshes.IsValidIndex(Target))
+    {
+        RecordProjectileSweepProfile(Started,false);
+        return false;
+    }
 
     const FVector WorldHit=GetActorTransform().TransformPosition(EnginePoint(Hit));
     const FVector Direction=(End-Start).GetSafeNormal();
@@ -346,6 +434,7 @@ bool AAp5Monster::ApplyProjectileSweep(const FVector& Start, const FVector& End,
     UE_LOG(LogTemp,Display,
         TEXT("AP5_PROJECTILE_VOLUME_SWEEP: target=%d sweep_radius_cm=%.1f explosive=%d"),
         Target,SweepRadius,bExplosive ? 1 : 0);
+    RecordProjectileSweepProfile(Started,false);
     return true;
 }
 
