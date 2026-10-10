@@ -24,6 +24,9 @@ public:
     int32 ApplyImpact(const FVector& Start, const FVector& Direction, float Radius);
     int32 ApplyProjectileHit(UPrimitiveComponent* HitComponent, const FVector& HitPoint,
         const FVector& Direction, float Radius, float ImpulseStrength);
+    int32 ApplyProjectileBlast(const FVector& HitPoint, const FVector& Direction, float Radius);
+    bool ApplyProjectileSweep(const FVector& Start, const FVector& End, float SweepRadius,
+        float ImpactRadius, bool bExplosive, float ExplosionRadius, float ImpulseStrength);
     int32 ApplyBlast(const FVector& Start, const FVector& Direction, float Radius);
     int32 Cut(const FVector& PlanePoint, const FVector& PlaneNormal);
     void ResetShape();
