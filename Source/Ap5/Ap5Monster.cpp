@@ -301,6 +301,54 @@ int32 AAp5Monster::ApplyProjectileHit(UPrimitiveComponent* HitComponent, const F
     return Samples;
 }
 
+int32 AAp5Monster::ApplyProjectileBlast(const FVector& HitPoint, const FVector& Direction, float Radius)
+{
+    const double Started=FPlatformTime::Seconds();
+    if (Radius<=0 || Direction.IsNearlyZero()) return 0;
+    SyncPhysicsState();
+    const FVector LocalHit=GetActorTransform().InverseTransformPosition(HitPoint);
+    const FVector LocalDirection=GetActorTransform().InverseTransformVectorNoScale(Direction).GetSafeNormal();
+    const FVector Center=LocalHit+LocalDirection*Radius*0.25f;
+    const int32 Before=static_cast<int32>(Pieces.Items.size());
+    std::vector<int> Changed;
+    const int32 Samples=Pieces.Blast(VolumePoint(Center),Radius,550.0,Changed);
+    LastSeparatedPieces=static_cast<int32>(Pieces.Items.size())-Before;
+    if (!Changed.empty()) RefreshPieces(Changed);
+    LastEditMilliseconds=(FPlatformTime::Seconds()-Started)*1000;
+    UE_LOG(LogTemp,Display,
+        TEXT("AP5_PROJECTILE_BLAST: radius_cm=%.0f samples=%d changed=%d separated=%d total=%d cpu_ms=%.2f"),
+        Radius,Samples,static_cast<int32>(Changed.size()),LastSeparatedPieces,
+        static_cast<int32>(Pieces.Items.size()),LastEditMilliseconds);
+    return Samples;
+}
+
+bool AAp5Monster::ApplyProjectileSweep(const FVector& Start, const FVector& End, float SweepRadius,
+    float ImpactRadius, bool bExplosive, float ExplosionRadius, float ImpulseStrength)
+{
+    SyncPhysicsState();
+    const FVector LocalStart=GetActorTransform().InverseTransformPosition(Start);
+    const FVector LocalEnd=GetActorTransform().InverseTransformPosition(End);
+    if ((LocalEnd-LocalStart).IsNearlyZero()) return false;
+
+    double Nearest=0;
+    Ap5Volume::Point Hit;
+    const int32 Target=Pieces.PickSwept(
+        VolumePoint(LocalStart),VolumePoint(LocalEnd),SweepRadius,Nearest,Hit);
+    if (Target<0 || !PieceMeshes.IsValidIndex(Target)) return false;
+
+    const FVector WorldHit=GetActorTransform().TransformPosition(EnginePoint(Hit));
+    const FVector Direction=(End-Start).GetSafeNormal();
+    if (bExplosive)
+        ApplyProjectileBlast(WorldHit,Direction,ExplosionRadius);
+    else
+        ApplyProjectileHit(PieceMeshes[Target],WorldHit,Direction,ImpactRadius,ImpulseStrength);
+
+    UE_LOG(LogTemp,Display,
+        TEXT("AP5_PROJECTILE_VOLUME_SWEEP: target=%d sweep_radius_cm=%.1f explosive=%d"),
+        Target,SweepRadius,bExplosive ? 1 : 0);
+    return true;
+}
+
 int32 AAp5Monster::ApplyBlast(const FVector& Start, const FVector& Direction, float Radius)
 {
     const double Started=FPlatformTime::Seconds();
