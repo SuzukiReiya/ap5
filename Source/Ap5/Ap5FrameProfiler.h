@@ -17,6 +17,7 @@ enum class EAp5ProfileProcess : uint8
     CollisionUpdate,
     PhysicsBodySetup,
     ComponentCreate,
+    ProfilerIO,
     Unmeasured,
     Count
 };
@@ -26,14 +27,13 @@ class FAp5FrameProfiler
 public:
     static FAp5FrameProfiler& Get();
 
-    // PlayerTickから各フレーム1回呼ぶ。DeltaSecondsはゲームフレーム全体の時間。
-    void BeginFrame(float DeltaSeconds);
+    // PlayerTickの先頭から各フレーム1回呼び、前回呼び出しからの実時間を1フレームとして確定する。
+    void BeginFrame();
     void AddMilliseconds(EAp5ProfileProcess Process, double Milliseconds);
 
 private:
     FAp5FrameProfiler() = default;
-    void MoveToFrame(uint64 FrameNumber);
-    void FinalizeCurrentFrame();
+    void FinalizeCurrentFrame(double FrameMilliseconds);
     void WriteSummaryIfNeeded();
 
     struct FSummary
@@ -46,8 +46,8 @@ private:
     static constexpr double SlowFrameThresholdMilliseconds = 20.0; // 50 FPS未満
     static constexpr int32 FileWriteIntervalFrames = 30;
 
-    uint64 CurrentFrame = TNumericLimits<uint64>::Max();
-    double CurrentFrameMilliseconds = 0.0;
+    double PreviousFrameBoundarySeconds = 0.0;
+    bool bStarted = false;
     double CurrentMilliseconds[static_cast<int32>(EAp5ProfileProcess::Count)] = {};
     FSummary Summary[static_cast<int32>(EAp5ProfileProcess::Count)];
 
