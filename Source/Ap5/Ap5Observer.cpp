@@ -169,6 +169,7 @@ void AAp5Observer::PlayerTick(float DeltaTime)
     if (WasInputKeyJustPressed(EKeys::Nine))
     {
         bProjectileMode=false;
+        bBlastMode=false;
         bGrabMode=false;
         bJoinMode=false;
         bDrawingCut=false;
