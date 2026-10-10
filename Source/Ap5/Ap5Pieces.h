@@ -142,6 +142,37 @@ public:
         return Target;
     }
 
+    // 球形弾の移動区間を9本の平行レイで近似する。
+    // Chaos用衝突箱の継ぎ目を通っても、体積データ上で弾半径内に材料があれば拾う。
+    int PickSwept(const Point& Start,const Point& End,double Radius,double& Nearest,Point& Hit) const
+    {
+        const Point Segment=End-Start;
+        const double Length=Segment.Length();
+        Nearest=Length+std::max(0.0,Radius);
+        if (Length<1e-12) return -1;
+        const Point Axis=Segment*(1.0/Length);
+        const Point Reference=std::abs(Axis.Z)<0.9 ? Point(0,0,1) : Point(0,1,0);
+        const Point Side=Axis.Cross(Reference).Unit();
+        const Point Up=Side.Cross(Axis).Unit();
+        const double R=std::max(0.0,Radius)*0.75;
+        const Point Offsets[9]={
+            Point(), Side*R, Side*(-R), Up*R, Up*(-R),
+            (Side+Up).Unit()*R, (Side-Up).Unit()*R,
+            (Side*(-1.0)+Up).Unit()*R, (Side*(-1.0)-Up).Unit()*R
+        };
+        int Target=-1;
+        for (int O=0;O<9;++O)
+        {
+            double Distance=0;
+            const int Candidate=Pick(Start+Offsets[O],Axis,Distance);
+            if (Candidate<0 || Distance>Length+Radius || Distance>=Nearest) continue;
+            Target=Candidate;
+            Nearest=Distance;
+            Hit=Start+Offsets[O]+Axis*Distance;
+        }
+        return Target;
+    }
+
     // 選んだ破片を接合先の姿勢へ合わせる。成功時だけ元の破片を除去する。
     // 戻り値：接合先の新番号、-1=対象不正、-2=共通の分離元なし、-3=つながらない。
     int Join(int Source,int Target)
