@@ -210,6 +210,24 @@ public:
         return Total;
     }
 
+    // 実体弾など、衝突で対象破片が既知の場合にその命中点へ直接加工する。
+    int ImpactAt(int Target,const Point& Hit,const Point& Direction,double Radius,double Depth,
+        std::vector<int>& Changed,int MaximumPieces=33)
+    {
+        Changed.clear();
+        if (Target<0 || Target>=static_cast<int>(Items.size())
+            || Direction.Length()<1e-12 || Radius<=0 || Depth<=0) return 0;
+        const Point Axis=Direction.Unit();
+        Field Edited=Items[Target].Volume;
+        const int Count=Edited.Dent(Items[Target].ToLocal(Hit),Items[Target].ToLocalVector(Axis),Radius,Depth);
+        if (Count==0) return 0;
+        std::vector<Field> Parts;
+        if (!PrepareEdit(Edited,false,Parts)) return -1;
+        if (Items.size()+Parts.size()-1>static_cast<size_t>(MaximumPieces)) return -1;
+        ApplyParts(static_cast<size_t>(Target),Parts,Changed);
+        return Count;
+    }
+
     // 手前の塊だけに当てる。次の一発では加工済みの表面を改めて探す。
     int Impact(const Point& Start,const Point& Direction,double Radius,double Depth,std::vector<int>& Changed,int MaximumPieces=33)
     {
@@ -219,14 +237,7 @@ public:
         double Nearest=0;
         const int Target=Pick(Start,Axis,Nearest);
         if (Target<0) return 0;
-        Field Edited=Items[Target].Volume;
-        const int Count=Edited.Dent(Items[Target].ToLocal(Start+Axis*Nearest),Items[Target].ToLocalVector(Axis),Radius,Depth);
-        if (Count==0) return 0;
-        std::vector<Field> Parts;
-        if (!PrepareEdit(Edited,false,Parts)) return -1;
-        if (Items.size()+Parts.size()-1>static_cast<size_t>(MaximumPieces)) return -1;
-        ApplyParts(static_cast<size_t>(Target),Parts,Changed);
-        return Count;
+        return ImpactAt(Target,Start+Axis*Nearest,Axis,Radius,Depth,Changed,MaximumPieces);
     }
 
     // 同じ面が横切る全ての塊を加工する。上限超過時は一つも変更しない。

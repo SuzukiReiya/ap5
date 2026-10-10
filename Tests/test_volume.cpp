@@ -252,6 +252,15 @@ int main()
         assert(Scene.Impact(ShotStart,ShotDirection,20,8,Changed)>0 && !Changed.empty());
     assert(Changed[0]==0);
     assert(Scene.Items[0].Volume.MaterialCount()<BackCount);
+
+    // 実体弾は衝突コンポーネントが既知なので、手前の別破片に遮られても指定破片を加工できる。
+    Scene.Reset(TargetVolume);
+    Ap5Volume::Piece Shield=Front;
+    Scene.Items.push_back(Shield);
+    const int DirectBefore=Scene.Items[0].Volume.MaterialCount();
+    assert(Scene.ImpactAt(0,Point(-40,1,2),ShotDirection,20,8,Changed)>0);
+    assert(!Changed.empty() && Changed[0]==0);
+    assert(Scene.Items[0].Volume.MaterialCount()<DirectBefore);
     // 逆方向と不正な射線。
     assert(TargetVolume.Trace(Point(200,1,2),Point(-1,0,0),4000,BeforeHit));
     assert(!TargetVolume.Trace(ShotStart,Point(),4000,BeforeHit));

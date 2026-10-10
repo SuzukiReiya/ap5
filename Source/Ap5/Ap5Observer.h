@@ -7,6 +7,7 @@
 
 class ACameraActor;
 class AAp5Monster;
+class AAp5Projectile;
 
 UCLASS()
 class AP5_API AAp5Observer : public APlayerController
@@ -19,6 +20,7 @@ public:
     bool IsJoinMode() const { return bJoinMode; }
     bool IsBlastMode() const { return bBlastMode; }
     bool IsGrabMode() const { return bGrabMode; }
+    bool IsProjectileMode() const { return bProjectileMode; }
     bool GetJoinMarker(FVector2D& ScreenPosition) const;
     bool GetGrabMarker(FVector2D& ScreenPosition) const;
     bool IsImpactMode() const { return bImpactMode; }
@@ -39,6 +41,7 @@ private:
     bool bJoinMode = false;
     bool bBlastMode = false;
     bool bGrabMode = false;
+    bool bProjectileMode = false;
     bool bImpactMode = true;
     bool bRepairMode = false;
     bool bCutMode = false;

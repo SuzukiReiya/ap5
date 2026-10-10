@@ -1,5 +1,6 @@
 #include "Ap5Observer.h"
 #include "Ap5Monster.h"
+#include "Ap5Projectile.h"
 #include "EngineUtils.h"
 
 #include "Camera/CameraActor.h"
@@ -108,23 +109,29 @@ void AAp5Observer::PlayerTick(float DeltaTime)
             break;
         }
     }
+    if (WasInputKeyJustPressed(EKeys::P))
+    {
+        bProjectileMode=true; bGrabMode=false; bBlastMode=false; bJoinMode=false;
+        bImpactMode=false; bRepairMode=false; bCutMode=false; bDrawingCut=false;
+        EditStatus=TEXT("実体弾：クリック方向へ可視弾を発射。飛翔後に衝突して弾痕と運動量を与えます。");
+    }
     if (WasInputKeyJustPressed(EKeys::G))
     {
-        bGrabMode=true; bBlastMode=false; bJoinMode=false; bImpactMode=false; bRepairMode=false; bCutMode=false; bDrawingCut=false;
+        bProjectileMode=false; bGrabMode=true; bBlastMode=false; bJoinMode=false; bImpactMode=false; bRepairMode=false; bCutMode=false; bDrawingCut=false;
         EditStatus=TEXT("把持：分離した破片を左ボタンで掴み、押したまま移動して離してください。");
     }
     if (WasInputKeyJustPressed(EKeys::Zero))
     {
-        bGrabMode=false; bBlastMode=true; bJoinMode=false; bImpactMode=false; bRepairMode=false; bCutMode=false; bDrawingCut=false;
+        bProjectileMode=false; bGrabMode=false; bBlastMode=true; bJoinMode=false; bImpactMode=false; bRepairMode=false; bCutMode=false; bDrawingCut=false;
         EditStatus=TEXT("爆発：クリック地点を中心に球状破壊し、分離破片を外側へ飛ばします。");
     }
-    if (WasInputKeyJustPressed(EKeys::One)) { bGrabMode = false; bBlastMode = false; bJoinMode = false; bImpactMode = false; bRepairMode = false; bCutMode = false; bDrawingCut = false; }
-    if (WasInputKeyJustPressed(EKeys::Two)) { bGrabMode = false; bBlastMode = false; bJoinMode = false; bImpactMode = false; bRepairMode = true; bCutMode = false; bDrawingCut = false; }
-    if (WasInputKeyJustPressed(EKeys::Six)) { bGrabMode = false; bBlastMode = false; bJoinMode = false; bImpactMode = false; bCutMode = true; bDrawingCut = false; }
-    if (WasInputKeyJustPressed(EKeys::Seven)) { bGrabMode = false; bBlastMode = false; bJoinMode = false; bImpactMode = true; bRepairMode = false; bCutMode = false; bDrawingCut = false; }
+    if (WasInputKeyJustPressed(EKeys::One)) { bProjectileMode = false; bGrabMode = false; bBlastMode = false; bJoinMode = false; bImpactMode = false; bRepairMode = false; bCutMode = false; bDrawingCut = false; }
+    if (WasInputKeyJustPressed(EKeys::Two)) { bProjectileMode = false; bGrabMode = false; bBlastMode = false; bJoinMode = false; bImpactMode = false; bRepairMode = true; bCutMode = false; bDrawingCut = false; }
+    if (WasInputKeyJustPressed(EKeys::Six)) { bProjectileMode = false; bGrabMode = false; bBlastMode = false; bJoinMode = false; bImpactMode = false; bCutMode = true; bDrawingCut = false; }
+    if (WasInputKeyJustPressed(EKeys::Seven)) { bProjectileMode = false; bGrabMode = false; bBlastMode = false; bJoinMode = false; bImpactMode = true; bRepairMode = false; bCutMode = false; bDrawingCut = false; }
     if (WasInputKeyJustPressed(EKeys::Eight))
     {
-        bGrabMode = false; bBlastMode = false; bJoinMode = true; bImpactMode = false; bRepairMode = false; bCutMode = false; bDrawingCut = false;
+        bProjectileMode = false; bGrabMode = false; bBlastMode = false; bJoinMode = true; bImpactMode = false; bRepairMode = false; bCutMode = false; bDrawingCut = false;
         if (IsValid(TestMonster)) TestMonster->ClearJoinSelection();
         EditStatus = TEXT("接合：戻す破片をクリックし、次に接合先をクリックしてください。");
     }
@@ -142,6 +149,7 @@ void AAp5Observer::PlayerTick(float DeltaTime)
     if (!bGrabMode) TestMonster->EndGrab();
     if (WasInputKeyJustPressed(EKeys::Nine))
     {
+        bProjectileMode=false;
         bGrabMode=false;
         bJoinMode=false;
         bDrawingCut=false;
@@ -221,6 +229,21 @@ void AAp5Observer::PlayerTick(float DeltaTime)
                 EditStatus = TestMonster->ApplyJoin(Start, Direction);
                 return;
             }
+            if (bProjectileMode)
+            {
+                FActorSpawnParameters Parameters;
+                Parameters.SpawnCollisionHandlingOverride=ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+                const FVector Axis=Direction.GetSafeNormal();
+                AAp5Projectile* Projectile=GetWorld()->SpawnActor<AAp5Projectile>(
+                    Start+Axis*30.0f,Axis.Rotation(),Parameters);
+                if (Projectile!=nullptr)
+                {
+                    Projectile->Launch(Axis,BrushRadius);
+                    EditStatus=FString::Printf(TEXT("実体弾を発射：速度 1800 cm/s / 弾痕半径 %.0f cm"),BrushRadius);
+                }
+                else EditStatus=TEXT("実体弾の生成に失敗しました。");
+                return;
+            }
             const float EffectiveRadius=bBlastMode ? BrushRadius*1.5f : BrushRadius;
             const int32 ChangedSamples=bBlastMode
                 ? TestMonster->ApplyBlast(Start,Direction,EffectiveRadius)
@@ -259,8 +282,8 @@ void AAp5ObserverHUD::DrawHUD()
     const AAp5Observer* Observer = Cast<AAp5Observer>(GetOwningPlayerController());
     if (Observer == nullptr) return;
     const float DisplayRadius=Observer->IsBlastMode() ? Observer->GetBrushRadius()*1.5f : Observer->GetBrushRadius();
-    DrawText(FString::Printf(TEXT("%s　半径 %.0f cm　G：把持　0：爆発　7：弾痕　1：貫通穴　2：修復　6：切断　8：接合"),
-        Observer->IsGrabMode() ? TEXT("把持") : (Observer->IsBlastMode() ? TEXT("爆発") : (Observer->IsJoinMode() ? TEXT("接合") : (Observer->IsImpactMode() ? TEXT("弾痕") : (Observer->IsCutMode() ? TEXT("切断") : (Observer->IsRepairMode() ? TEXT("修復") : TEXT("穴あけ")))))),
+    DrawText(FString::Printf(TEXT("%s　半径 %.0f cm　P：実体弾　G：把持　0：爆発　7：弾痕　1：穴　2：修復　6：切断　8：接合"),
+        Observer->IsProjectileMode() ? TEXT("実体弾") : (Observer->IsGrabMode() ? TEXT("把持") : (Observer->IsBlastMode() ? TEXT("爆発") : (Observer->IsJoinMode() ? TEXT("接合") : (Observer->IsImpactMode() ? TEXT("弾痕") : (Observer->IsCutMode() ? TEXT("切断") : (Observer->IsRepairMode() ? TEXT("修復") : TEXT("穴あけ"))))))),
         DisplayRadius), FColor::White, 24, 20);
     DrawText(TEXT("3：細い　4：標準　5：太い　M：材質差 ON/OFF　9：右腕関節動作　Backspace：リセット"), FColor::White, 24, 44);
     DrawText(TEXT("右ドラッグ／矢印：回転　ホイール／PageUp・Down：ズーム　R：視点を戻す　Esc：終了"), FColor::White, 24, 68);

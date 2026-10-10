@@ -253,6 +253,54 @@ int32 AAp5Monster::ApplyImpact(const FVector& Start, const FVector& Direction, f
     return Samples;
 }
 
+int32 AAp5Monster::ApplyProjectileHit(UPrimitiveComponent* HitComponent, const FVector& HitPoint,
+    const FVector& Direction, float Radius, float ImpulseStrength)
+{
+    const double Started=FPlatformTime::Seconds();
+    if (HitComponent==nullptr || Direction.IsNearlyZero()) return 0;
+    SyncPhysicsState();
+
+    int32 Target=INDEX_NONE;
+    for (int32 I=0;I<PieceMeshes.Num();++I)
+    {
+        if (PieceMeshes[I]==HitComponent) { Target=I; break; }
+    }
+    if (Target==INDEX_NONE || Target>=static_cast<int32>(Pieces.Items.size())) return 0;
+
+    const FVector LocalHit=GetActorTransform().InverseTransformPosition(HitPoint);
+    const FVector LocalDirection=GetActorTransform().InverseTransformVectorNoScale(Direction).GetSafeNormal();
+    FString MaterialName;
+    const Ap5Volume::Point PieceHit=Pieces.Items[Target].ToLocal(VolumePoint(LocalHit));
+    const double Resistance=ImpactResistanceAt(PieceHit,MaterialName);
+    const double Depth=8.0/Resistance;
+    LastImpactMaterialText=FString::Printf(TEXT("%s x%.1f / 深さ %.1f cm"),
+        *MaterialName,Resistance,Depth);
+
+    const int32 Before=static_cast<int32>(Pieces.Items.size());
+    std::vector<int> Changed;
+    const int32 Samples=Pieces.ImpactAt(Target,VolumePoint(LocalHit),VolumePoint(LocalDirection),
+        Radius,Depth,Changed);
+    LastSeparatedPieces=static_cast<int32>(Pieces.Items.size())-Before;
+    if (!Changed.empty()) RefreshPieces(Changed);
+
+    // 加工で分離した場合も、命中点の直後にある自由破片へ運動量を渡す。
+    double Nearest=0;
+    const Ap5Volume::Point ProbeStart=VolumePoint(LocalHit)-VolumePoint(LocalDirection)*10.0;
+    const int32 ImpulseTarget=Pieces.Pick(ProbeStart,VolumePoint(LocalDirection),Nearest);
+    if (ImpulseTarget>=0 && PieceMeshes.IsValidIndex(ImpulseTarget)
+        && PieceMeshes[ImpulseTarget]->IsSimulatingPhysics())
+    {
+        PieceMeshes[ImpulseTarget]->AddImpulseAtLocation(
+            Direction.GetSafeNormal()*ImpulseStrength,HitPoint,NAME_None);
+    }
+
+    LastEditMilliseconds=(FPlatformTime::Seconds()-Started)*1000;
+    UE_LOG(LogTemp, Display,
+        TEXT("AP5_PROJECTILE_HIT: target=%d radius_cm=%.0f depth_cm=%.1f resistance=%.1f material=%s impulse=%.0f samples=%d separated=%d cpu_ms=%.2f"),
+        Target,Radius,Depth,Resistance,*MaterialName,ImpulseStrength,Samples,LastSeparatedPieces,LastEditMilliseconds);
+    return Samples;
+}
+
 int32 AAp5Monster::ApplyBlast(const FVector& Start, const FVector& Direction, float Radius)
 {
     const double Started=FPlatformTime::Seconds();

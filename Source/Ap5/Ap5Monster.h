@@ -8,6 +8,7 @@
 class UDynamicMeshComponent;
 class UMaterialInterface;
 class UPhysicsHandleComponent;
+class UPrimitiveComponent;
 
 // 全身の体積から外皮・内壁・切断面を生成する検証用モンスター。
 UCLASS()
@@ -21,6 +22,8 @@ public:
     virtual void Tick(float DeltaSeconds) override;
     int32 ApplyBrush(const FVector& Start, const FVector& Direction, float Radius, bool bRepair);
     int32 ApplyImpact(const FVector& Start, const FVector& Direction, float Radius);
+    int32 ApplyProjectileHit(UPrimitiveComponent* HitComponent, const FVector& HitPoint,
+        const FVector& Direction, float Radius, float ImpulseStrength);
     int32 ApplyBlast(const FVector& Start, const FVector& Direction, float Radius);
     int32 Cut(const FVector& PlanePoint, const FVector& PlaneNormal);
     void ResetShape();
