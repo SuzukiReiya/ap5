@@ -58,6 +58,23 @@ void AAp5Observer::UpdateView()
     ObservationCamera->SetActorRotation((-Offset).Rotation());
 }
 
+bool AAp5Observer::FireProjectile(bool bExplosive)
+{
+    FVector Start,Direction;
+    if (!DeprojectMousePositionToWorld(Start,Direction)) return false;
+    const FVector Axis=Direction.GetSafeNormal();
+    if (Axis.IsNearlyZero()) return false;
+
+    FActorSpawnParameters Parameters;
+    Parameters.SpawnCollisionHandlingOverride=ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+    AAp5Projectile* Projectile=GetWorld()->SpawnActor<AAp5Projectile>(
+        Start+Axis*30.0f,Axis.Rotation(),Parameters);
+    if (Projectile==nullptr) return false;
+
+    Projectile->Launch(Axis,BrushRadius,bExplosive,BrushRadius*1.5f);
+    return true;
+}
+
 void AAp5Observer::PlayerTick(float DeltaTime)
 {
     Super::PlayerTick(DeltaTime);
@@ -113,7 +130,8 @@ void AAp5Observer::PlayerTick(float DeltaTime)
     {
         bProjectileMode=true; bGrabMode=false; bBlastMode=false; bJoinMode=false;
         bImpactMode=false; bRepairMode=false; bCutMode=false; bDrawingCut=false;
-        EditStatus=TEXT("実体弾：クリック方向へ可視弾を発射。飛翔後に衝突して弾痕と運動量を与えます。");
+        FireCooldown=0.0f;
+        EditStatus=TEXT("実体弾：左ボタン長押しで連射。飛翔後に衝突して弾痕と運動量を与えます。");
     }
     if (WasInputKeyJustPressed(EKeys::G))
     {
@@ -123,7 +141,8 @@ void AAp5Observer::PlayerTick(float DeltaTime)
     if (WasInputKeyJustPressed(EKeys::Zero))
     {
         bProjectileMode=false; bGrabMode=false; bBlastMode=true; bJoinMode=false; bImpactMode=false; bRepairMode=false; bCutMode=false; bDrawingCut=false;
-        EditStatus=TEXT("爆発：クリック地点を中心に球状破壊し、分離破片を外側へ飛ばします。");
+        FireCooldown=0.0f;
+        EditStatus=TEXT("爆発弾：左ボタン長押しで連射。実体弾の着弾地点で球状破壊します。");
     }
     if (WasInputKeyJustPressed(EKeys::One)) { bProjectileMode = false; bGrabMode = false; bBlastMode = false; bJoinMode = false; bImpactMode = false; bRepairMode = false; bCutMode = false; bDrawingCut = false; }
     if (WasInputKeyJustPressed(EKeys::Two)) { bProjectileMode = false; bGrabMode = false; bBlastMode = false; bJoinMode = false; bImpactMode = false; bRepairMode = true; bCutMode = false; bDrawingCut = false; }
@@ -167,8 +186,30 @@ void AAp5Observer::PlayerTick(float DeltaTime)
         bDrawingCut = false;
         EditStatus = TEXT("全形状を初期状態に戻しました（修復操作とは別）");
     }
-    // 案内の上と視点ドラッグ中は加工しない。長押しによる連続加工も行わない。
+    // 案内の上と視点ドラッグ中は加工しない。
     const bool bOverHUD = bMouseAvailable && MouseX >= 12 && MouseX <= 1012 && MouseY >= 12 && MouseY <= 146;
+    FireCooldown=FMath::Max(0.0f,FireCooldown-DeltaTime);
+    if (bProjectileMode || bBlastMode)
+    {
+        if (IsInputKeyDown(EKeys::LeftMouseButton) && bMouseAvailable && !bDragging && !bOverHUD
+            && FireCooldown<=0.0f)
+        {
+            const bool bExplosive=bBlastMode;
+            if (FireProjectile(bExplosive))
+            {
+                FireCooldown=0.12f;
+                EditStatus=bExplosive
+                    ? FString::Printf(TEXT("爆発弾を発射：速度1800 cm/s / 着弾爆発半径 %.0f cm"),BrushRadius*1.5f)
+                    : FString::Printf(TEXT("実体弾を発射：速度1800 cm/s / 弾痕半径 %.0f cm"),BrushRadius);
+            }
+            else
+            {
+                FireCooldown=0.12f;
+                EditStatus=TEXT("実体弾の生成に失敗しました。");
+            }
+        }
+        return;
+    }
     if (bGrabMode)
     {
         FVector GrabStart,GrabDirection;
@@ -229,33 +270,16 @@ void AAp5Observer::PlayerTick(float DeltaTime)
                 EditStatus = TestMonster->ApplyJoin(Start, Direction);
                 return;
             }
-            if (bProjectileMode)
-            {
-                FActorSpawnParameters Parameters;
-                Parameters.SpawnCollisionHandlingOverride=ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-                const FVector Axis=Direction.GetSafeNormal();
-                AAp5Projectile* Projectile=GetWorld()->SpawnActor<AAp5Projectile>(
-                    Start+Axis*30.0f,Axis.Rotation(),Parameters);
-                if (Projectile!=nullptr)
-                {
-                    Projectile->Launch(Axis,BrushRadius);
-                    EditStatus=FString::Printf(TEXT("実体弾を発射：速度 1800 cm/s / 弾痕半径 %.0f cm"),BrushRadius);
-                }
-                else EditStatus=TEXT("実体弾の生成に失敗しました。");
-                return;
-            }
-            const float EffectiveRadius=bBlastMode ? BrushRadius*1.5f : BrushRadius;
-            const int32 ChangedSamples=bBlastMode
-                ? TestMonster->ApplyBlast(Start,Direction,EffectiveRadius)
-                : (bImpactMode ? TestMonster->ApplyImpact(Start,Direction,BrushRadius)
-                    : TestMonster->ApplyBrush(Start,Direction,BrushRadius,bRepairMode));
+            const int32 ChangedSamples=bImpactMode
+                ? TestMonster->ApplyImpact(Start,Direction,BrushRadius)
+                : TestMonster->ApplyBrush(Start,Direction,BrushRadius,bRepairMode);
             if (ChangedSamples < 0) EditStatus = TEXT("分離上限のため加工しませんでした。Backspaceで全リセットできます。");
             else if (bImpactMode) EditStatus = FString::Printf(
                 TEXT("弾痕：更新 %d 格子点 / 分離 %d 個 / CPU処理 %.1f ms / %s"),
                 ChangedSamples,TestMonster->LastSeparatedPieces,TestMonster->LastEditMilliseconds,
                 *TestMonster->GetLastImpactMaterialText());
             else EditStatus = FString::Printf(TEXT("%s：更新 %d 格子点 / 分離 %d 個 / CPU処理 %.1f ms"),
-                bBlastMode ? TEXT("爆発") : (bRepairMode ? TEXT("修復") : TEXT("穴あけ")),
+                bRepairMode ? TEXT("修復") : TEXT("穴あけ"),
                 ChangedSamples, TestMonster->LastSeparatedPieces, TestMonster->LastEditMilliseconds);
         }
     }
@@ -282,8 +306,8 @@ void AAp5ObserverHUD::DrawHUD()
     const AAp5Observer* Observer = Cast<AAp5Observer>(GetOwningPlayerController());
     if (Observer == nullptr) return;
     const float DisplayRadius=Observer->IsBlastMode() ? Observer->GetBrushRadius()*1.5f : Observer->GetBrushRadius();
-    DrawText(FString::Printf(TEXT("%s　半径 %.0f cm　P：実体弾　G：把持　0：爆発　7：弾痕　1：穴　2：修復　6：切断　8：接合"),
-        Observer->IsProjectileMode() ? TEXT("実体弾") : (Observer->IsGrabMode() ? TEXT("把持") : (Observer->IsBlastMode() ? TEXT("爆発") : (Observer->IsJoinMode() ? TEXT("接合") : (Observer->IsImpactMode() ? TEXT("弾痕") : (Observer->IsCutMode() ? TEXT("切断") : (Observer->IsRepairMode() ? TEXT("修復") : TEXT("穴あけ"))))))),
+    DrawText(FString::Printf(TEXT("%s　半径 %.0f cm　P：実体弾　0：爆発弾　G：把持　7：弾痕　1：穴　2：修復　6：切断　8：接合"),
+        Observer->IsProjectileMode() ? TEXT("実体弾") : (Observer->IsGrabMode() ? TEXT("把持") : (Observer->IsBlastMode() ? TEXT("爆発弾") : (Observer->IsJoinMode() ? TEXT("接合") : (Observer->IsImpactMode() ? TEXT("弾痕") : (Observer->IsCutMode() ? TEXT("切断") : (Observer->IsRepairMode() ? TEXT("修復") : TEXT("穴あけ"))))))),
         DisplayRadius), FColor::White, 24, 20);
     DrawText(TEXT("3：細い　4：標準　5：太い　M：材質差 ON/OFF　9：右腕関節動作　Backspace：リセット"), FColor::White, 24, 44);
     DrawText(TEXT("右ドラッグ／矢印：回転　ホイール／PageUp・Down：ズーム　R：視点を戻す　Esc：終了"), FColor::White, 24, 68);
