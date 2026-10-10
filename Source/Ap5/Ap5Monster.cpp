@@ -83,6 +83,7 @@ UDynamicMeshComponent* AAp5Monster::CreatePiece()
     Piece->SetupAttachment(RootComponent);
     Piece->SetMobility(EComponentMobility::Movable);
     Piece->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    Piece->SetCollisionResponseToAllChannels(ECR_Block);
     // 連射時に単純衝突の再Cookでゲームスレッドを止めない。
     Piece->bUseAsyncCooking = true;
     Piece->SetComplexAsSimpleCollisionEnabled(false, false);
@@ -93,6 +94,7 @@ UDynamicMeshComponent* AAp5Monster::CreatePiece()
     Piece->SetMaterial(0, GolemMaterial != nullptr
         ? GolemMaterial.Get() : UMaterial::GetDefaultMaterial(MD_Surface));
     Piece->RegisterComponent();
+    Piece->SetUseCCD(true, NAME_None);
     return Piece;
 }
 
@@ -100,8 +102,15 @@ void AAp5Monster::RebuildMesh(int32 Index)
 {
     Ap5Volume::Piece& State = Pieces.Items[Index];
     UDynamicMeshComponent* Component = PieceMeshes[Index];
-    Component->SetSimulatePhysics(false);
-    Component->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+
+    // 動的破片だけ、一時的に物理シミュレーションを止める。
+    // 固定本体では毎回OFF→ON相当のPhysicsState再生成を起こさない。
+    const bool bWasSimulating=Component->IsSimulatingPhysics();
+    if (bWasSimulating)
+    {
+        FAp5ProfileScope Profile(EAp5ProfileProcess::PhysicsSimulationToggle);
+        Component->SetSimulatePhysics(false);
+    }
 
     std::vector<Ap5Volume::Triangle> Surface;
     {
@@ -137,9 +146,12 @@ void AAp5Monster::RebuildMesh(int32 Index)
         Component->SetMesh(MoveTemp(Mesh));
     }
 
-    const FQuat Rotation = FRotationMatrix::MakeFromXY(EnginePoint(State.AxisX), EnginePoint(State.AxisY)).ToQuat();
-    const FTransform LocalTransform(Rotation, EnginePoint(State.ToWorld(Ap5Volume::Point())));
-    Component->SetWorldTransform(LocalTransform * GetActorTransform(), false, nullptr, ETeleportType::TeleportPhysics);
+    const FQuat Rotation = FRotationMatrix::MakeFromXY(
+        EnginePoint(State.AxisX), EnginePoint(State.AxisY)).ToQuat();
+    const FTransform LocalTransform(
+        Rotation, EnginePoint(State.ToWorld(Ap5Volume::Point())));
+    Component->SetWorldTransform(
+        LocalTransform * GetActorTransform(), false, nullptr, ETeleportType::TeleportPhysics);
 
     FKAggregateGeom Collision;
     std::vector<Ap5Volume::CollisionBox> Boxes;
@@ -164,26 +176,40 @@ void AAp5Monster::RebuildMesh(int32 Index)
     }
 
     {
-        FAp5ProfileScope Profile(EAp5ProfileProcess::PhysicsBodySetup);
-        if (!Boxes.empty())
+        FAp5ProfileScope Profile(EAp5ProfileProcess::PhysicsCollisionState);
+        if (Boxes.empty())
         {
-            Component->SetCollisionObjectType(State.Fixed
-                ? (State.Driven ? ECC_WorldDynamic : ECC_WorldStatic) : ECC_PhysicsBody);
-            Component->SetCollisionResponseToAllChannels(ECR_Block);
-            Component->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-            Component->SetUseCCD(true, NAME_None);
-            Component->SetSimulatePhysics(!State.Fixed);
-            if (!State.Fixed)
-            {
-                const Ap5Volume::Point Center = VolumePoint(
-                    GetActorTransform().InverseTransformPosition(Component->GetCenterOfMass()));
-                Component->SetPhysicsLinearVelocity(
-                    GetActorTransform().TransformVectorNoScale(EnginePoint(State.VelocityAt(Center))));
-                Component->SetPhysicsAngularVelocityInRadians(
-                    GetActorTransform().TransformVectorNoScale(EnginePoint(State.AngularVelocity)));
-                Component->WakeAllRigidBodies();
-            }
+            if (Component->GetCollisionEnabled()!=ECollisionEnabled::NoCollision)
+                Component->SetCollisionEnabled(ECollisionEnabled::NoCollision);
         }
+        else
+        {
+            const ECollisionChannel DesiredType=State.Fixed
+                ? (State.Driven ? ECC_WorldDynamic : ECC_WorldStatic) : ECC_PhysicsBody;
+            if (Component->GetCollisionObjectType()!=DesiredType)
+                Component->SetCollisionObjectType(DesiredType);
+            if (Component->GetCollisionEnabled()!=ECollisionEnabled::QueryAndPhysics)
+                Component->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+        }
+    }
+
+    const bool bShouldSimulate=!Boxes.empty() && !State.Fixed;
+    if (Component->IsSimulatingPhysics()!=bShouldSimulate)
+    {
+        FAp5ProfileScope Profile(EAp5ProfileProcess::PhysicsSimulationToggle);
+        Component->SetSimulatePhysics(bShouldSimulate);
+    }
+
+    if (bShouldSimulate)
+    {
+        FAp5ProfileScope Profile(EAp5ProfileProcess::PhysicsVelocityRestore);
+        const Ap5Volume::Point Center = VolumePoint(
+            GetActorTransform().InverseTransformPosition(Component->GetCenterOfMass()));
+        Component->SetPhysicsLinearVelocity(
+            GetActorTransform().TransformVectorNoScale(EnginePoint(State.VelocityAt(Center))));
+        Component->SetPhysicsAngularVelocityInRadians(
+            GetActorTransform().TransformVectorNoScale(EnginePoint(State.AngularVelocity)));
+        Component->WakeAllRigidBodies();
     }
 }
 
