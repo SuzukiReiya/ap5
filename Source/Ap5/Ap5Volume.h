@@ -524,10 +524,18 @@ private:
     }
     Point Normal(const Point& P) const
     {
-        const double H = Spacing*0.25;
-        return Point(Sample(P+Point(H,0,0))-Sample(P-Point(H,0,0)),
-            Sample(P+Point(0,H,0))-Sample(P-Point(0,H,0)),
-            Sample(P+Point(0,0,H))-Sample(P-Point(0,0,H))).Unit();
+        // 表面頂点ごとに6回の三線形Sampleを行うと、全面再生成時の支配コストになる。
+        // 最寄り格子点の中心差分なら6個の格子値参照だけで済み、CSG後の勾配方向も保てる。
+        const int X=std::max(1,std::min(NX-2,
+            static_cast<int>(std::round((P.X-Origin.X)/Spacing))));
+        const int Y=std::max(1,std::min(NY-2,
+            static_cast<int>(std::round((P.Y-Origin.Y)/Spacing))));
+        const int Z=std::max(1,std::min(NZ-2,
+            static_cast<int>(std::round((P.Z-Origin.Z)/Spacing))));
+        return Point(
+            Values[Index(X+1,Y,Z)]-Values[Index(X-1,Y,Z)],
+            Values[Index(X,Y+1,Z)]-Values[Index(X,Y-1,Z)],
+            Values[Index(X,Y,Z+1)]-Values[Index(X,Y,Z-1)]).Unit();
     }
     void Emit(std::vector<Triangle>& Result, Point A, Point B, Point C, const Point& Outward) const
     {
