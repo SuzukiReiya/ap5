@@ -53,9 +53,6 @@ void AAp5Projectile::Launch(const FVector& Direction, float InImpactRadius,
     ExplosionRadius=FMath::Max(1.0f,InExplosionRadius);
     PreviousLocation=GetActorLocation();
     Movement->Velocity=FlightDirection*Movement->InitialSpeed;
-    UE_LOG(LogTemp,Display,
-        TEXT("AP5_PROJECTILE_FIRE: speed_cm_s=1800 impact_radius_cm=%.0f explosive=%d explosion_radius_cm=%.0f"),
-        ImpactRadius,bExplosive ? 1 : 0,ExplosionRadius);
 }
 
 void AAp5Projectile::Tick(float DeltaSeconds)
@@ -93,7 +90,5 @@ void AAp5Projectile::OnProjectileHit(UPrimitiveComponent* /*HitComponent*/, AAct
     {
         Monster->ApplyProjectileHit(OtherComp,Hit.ImpactPoint,FlightDirection,ImpactRadius,40000.0f);
     }
-    UE_LOG(LogTemp,Display,TEXT("AP5_PROJECTILE_COLLISION: actor=%s explosive=%d"),
-        OtherActor!=nullptr ? *OtherActor->GetName() : TEXT("None"),bExplosive ? 1 : 0);
     Destroy();
 }
