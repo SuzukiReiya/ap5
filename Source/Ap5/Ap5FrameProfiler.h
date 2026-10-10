@@ -38,7 +38,7 @@ private:
 
     struct FSummary
     {
-        double SumMilliseconds = 0.0;
+        double AverageMilliseconds = 0.0;
         double MinMilliseconds = TNumericLimits<double>::Max();
         double MaxMilliseconds = 0.0;
     };
