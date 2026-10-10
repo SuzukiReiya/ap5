@@ -79,8 +79,8 @@ bool AAp5Observer::FireProjectile(bool bExplosive)
 
 void AAp5Observer::PlayerTick(float DeltaTime)
 {
+    FAp5FrameProfiler::Get().BeginFrame();
     Super::PlayerTick(DeltaTime);
-    FAp5FrameProfiler::Get().BeginFrame(DeltaTime);
     if (!IsLocalController() || ObservationCamera == nullptr)
     {
         return;
