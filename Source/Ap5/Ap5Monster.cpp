@@ -1,4 +1,5 @@
 #include "Ap5Monster.h"
+#include "Ap5FrameProfiler.h"
 
 #include "Components/DynamicMeshComponent.h"
 #include "Components/SceneComponent.h"
@@ -76,6 +77,7 @@ void AAp5Monster::AddPart(FName /*Name*/, const FVector& Center,
 
 UDynamicMeshComponent* AAp5Monster::CreatePiece()
 {
+    FAp5ProfileScope Profile(EAp5ProfileProcess::ComponentCreate);
     UDynamicMeshComponent* Piece = NewObject<UDynamicMeshComponent>(this);
     AddInstanceComponent(Piece);
     Piece->SetupAttachment(RootComponent);
@@ -96,89 +98,93 @@ UDynamicMeshComponent* AAp5Monster::CreatePiece()
 
 void AAp5Monster::RebuildMesh(int32 Index)
 {
-    const double TotalStarted=FPlatformTime::Seconds();
     Ap5Volume::Piece& State = Pieces.Items[Index];
     UDynamicMeshComponent* Component = PieceMeshes[Index];
     Component->SetSimulatePhysics(false);
     Component->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 
-    const double SurfaceStarted=FPlatformTime::Seconds();
-    const std::vector<Ap5Volume::Triangle> Surface = State.RebuildSurface();
-    const double SurfaceMs=(FPlatformTime::Seconds()-SurfaceStarted)*1000.0;
-
-    const double MeshBuildStarted=FPlatformTime::Seconds();
-    UE::Geometry::FDynamicMesh3 Mesh;
-    Mesh.EnableAttributes();
-    for (const Ap5Volume::Triangle& Face : Surface)
+    std::vector<Ap5Volume::Triangle> Surface;
     {
-        int32 Vertices[3];
-        int32 Normals[3];
-        for (int32 K = 0; K < 3; ++K)
-        {
-            const Ap5Volume::Point& P = Face.Vertices[K];
-            const Ap5Volume::Point& N = Face.Normals[K];
-            Vertices[K] = Mesh.AppendVertex(FVector3d(P.X, P.Y, P.Z));
-            Normals[K] = Mesh.Attributes()->PrimaryNormals()->AppendElement(
-                FVector3f(static_cast<float>(N.X), static_cast<float>(N.Y), static_cast<float>(N.Z)));
-        }
-        const int32 Triangle = Mesh.AppendTriangle(Vertices[0], Vertices[1], Vertices[2]);
-        check(Triangle >= 0);
-        Mesh.Attributes()->PrimaryNormals()->SetTriangle(Triangle,
-            UE::Geometry::FIndex3i(Normals[0], Normals[1], Normals[2]));
+        FAp5ProfileScope Profile(EAp5ProfileProcess::SurfaceBuild);
+        Surface = State.RebuildSurface();
     }
-    const double MeshBuildMs=(FPlatformTime::Seconds()-MeshBuildStarted)*1000.0;
 
-    const double SetMeshStarted=FPlatformTime::Seconds();
-    Component->SetMesh(MoveTemp(Mesh));
-    const double SetMeshMs=(FPlatformTime::Seconds()-SetMeshStarted)*1000.0;
+    UE::Geometry::FDynamicMesh3 Mesh;
+    {
+        FAp5ProfileScope Profile(EAp5ProfileProcess::DynamicMeshBuild);
+        Mesh.EnableAttributes();
+        for (const Ap5Volume::Triangle& Face : Surface)
+        {
+            int32 Vertices[3];
+            int32 Normals[3];
+            for (int32 K = 0; K < 3; ++K)
+            {
+                const Ap5Volume::Point& P = Face.Vertices[K];
+                const Ap5Volume::Point& N = Face.Normals[K];
+                Vertices[K] = Mesh.AppendVertex(FVector3d(P.X, P.Y, P.Z));
+                Normals[K] = Mesh.Attributes()->PrimaryNormals()->AppendElement(
+                    FVector3f(static_cast<float>(N.X), static_cast<float>(N.Y), static_cast<float>(N.Z)));
+            }
+            const int32 Triangle = Mesh.AppendTriangle(Vertices[0], Vertices[1], Vertices[2]);
+            check(Triangle >= 0);
+            Mesh.Attributes()->PrimaryNormals()->SetTriangle(Triangle,
+                UE::Geometry::FIndex3i(Normals[0], Normals[1], Normals[2]));
+        }
+    }
+
+    {
+        FAp5ProfileScope Profile(EAp5ProfileProcess::SetMesh);
+        Component->SetMesh(MoveTemp(Mesh));
+    }
 
     const FQuat Rotation = FRotationMatrix::MakeFromXY(EnginePoint(State.AxisX), EnginePoint(State.AxisY)).ToQuat();
     const FTransform LocalTransform(Rotation, EnginePoint(State.ToWorld(Ap5Volume::Point())));
     Component->SetWorldTransform(LocalTransform * GetActorTransform(), false, nullptr, ETeleportType::TeleportPhysics);
 
-    const double CollisionBoxesStarted=FPlatformTime::Seconds();
     FKAggregateGeom Collision;
-    const std::vector<Ap5Volume::CollisionBox> Boxes = State.Volume.CollisionBoxes();
-    for (const Ap5Volume::CollisionBox& Box : Boxes)
+    std::vector<Ap5Volume::CollisionBox> Boxes;
     {
-        FKBoxElem Element;
-        Element.Center = EnginePoint(Box.Center);
-        Element.X = static_cast<float>(Box.Size.X);
-        Element.Y = static_cast<float>(Box.Size.Y);
-        Element.Z = static_cast<float>(Box.Size.Z);
-        Collision.BoxElems.Add(Element);
-    }
-    const double CollisionBoxesMs=(FPlatformTime::Seconds()-CollisionBoxesStarted)*1000.0;
-
-    const double CollisionUpdateStarted=FPlatformTime::Seconds();
-    Component->SetSimpleCollisionShapes(Collision, false);
-    Component->UpdateCollision(false);
-    const double CollisionUpdateMs=(FPlatformTime::Seconds()-CollisionUpdateStarted)*1000.0;
-
-    if (!Boxes.empty())
-    {
-        Component->SetCollisionObjectType(State.Fixed
-            ? (State.Driven ? ECC_WorldDynamic : ECC_WorldStatic) : ECC_PhysicsBody);
-        Component->SetCollisionResponseToAllChannels(ECR_Block);
-        Component->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-        Component->SetUseCCD(true, NAME_None);
-        Component->SetSimulatePhysics(!State.Fixed);
-        if (!State.Fixed)
+        FAp5ProfileScope Profile(EAp5ProfileProcess::CollisionBoxes);
+        Boxes = State.Volume.CollisionBoxes();
+        for (const Ap5Volume::CollisionBox& Box : Boxes)
         {
-            const Ap5Volume::Point Center = VolumePoint(GetActorTransform().InverseTransformPosition(Component->GetCenterOfMass()));
-            Component->SetPhysicsLinearVelocity(GetActorTransform().TransformVectorNoScale(EnginePoint(State.VelocityAt(Center))));
-            Component->SetPhysicsAngularVelocityInRadians(GetActorTransform().TransformVectorNoScale(EnginePoint(State.AngularVelocity)));
-            Component->WakeAllRigidBodies();
+            FKBoxElem Element;
+            Element.Center = EnginePoint(Box.Center);
+            Element.X = static_cast<float>(Box.Size.X);
+            Element.Y = static_cast<float>(Box.Size.Y);
+            Element.Z = static_cast<float>(Box.Size.Z);
+            Collision.BoxElems.Add(Element);
         }
     }
-    const double TotalMs=(FPlatformTime::Seconds()-TotalStarted)*1000.0;
-    UE_LOG(LogTemp, Display, TEXT("AP5_COLLISION: index=%d boxes=%d fixed=%d driven=%d simulated=%d"),
-        Index, static_cast<int32>(Boxes.size()), State.Fixed ? 1 : 0, State.Driven ? 1 : 0,
-        Component->IsSimulatingPhysics() ? 1 : 0);
-    UE_LOG(LogTemp, Display,
-        TEXT("AP5_REBUILD_PROFILE: index=%d triangles=%d boxes=%d surface_ms=%.2f mesh_build_ms=%.2f set_mesh_ms=%.2f collision_boxes_ms=%.2f collision_update_ms=%.2f total_ms=%.2f"),
-        Index,static_cast<int32>(Surface.size()),static_cast<int32>(Boxes.size()),SurfaceMs,MeshBuildMs,
-        SetMeshMs,CollisionBoxesMs,CollisionUpdateMs,TotalMs);
+
+    {
+        FAp5ProfileScope Profile(EAp5ProfileProcess::CollisionUpdate);
+        Component->SetSimpleCollisionShapes(Collision, false);
+        Component->UpdateCollision(false);
+    }
+
+    {
+        FAp5ProfileScope Profile(EAp5ProfileProcess::PhysicsBodySetup);
+        if (!Boxes.empty())
+        {
+            Component->SetCollisionObjectType(State.Fixed
+                ? (State.Driven ? ECC_WorldDynamic : ECC_WorldStatic) : ECC_PhysicsBody);
+            Component->SetCollisionResponseToAllChannels(ECR_Block);
+            Component->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+            Component->SetUseCCD(true, NAME_None);
+            Component->SetSimulatePhysics(!State.Fixed);
+            if (!State.Fixed)
+            {
+                const Ap5Volume::Point Center = VolumePoint(
+                    GetActorTransform().InverseTransformPosition(Component->GetCenterOfMass()));
+                Component->SetPhysicsLinearVelocity(
+                    GetActorTransform().TransformVectorNoScale(EnginePoint(State.VelocityAt(Center))));
+                Component->SetPhysicsAngularVelocityInRadians(
+                    GetActorTransform().TransformVectorNoScale(EnginePoint(State.AngularVelocity)));
+                Component->WakeAllRigidBodies();
+            }
+        }
+    }
 }
 
 void AAp5Monster::RefreshPieces(const std::vector<int>& Changed)
@@ -301,14 +307,14 @@ int32 AAp5Monster::ApplyProjectileHit(UPrimitiveComponent* HitComponent, const F
 
     const int32 Before=static_cast<int32>(Pieces.Items.size());
     std::vector<int> Changed;
-    const double VolumeEditStarted=FPlatformTime::Seconds();
-    const int32 Samples=Pieces.ImpactAt(Target,VolumePoint(LocalHit),VolumePoint(LocalDirection),
-        Radius,Depth,Changed);
-    const double VolumeEditMs=(FPlatformTime::Seconds()-VolumeEditStarted)*1000.0;
+    int32 Samples=0;
+    {
+        FAp5ProfileScope Profile(EAp5ProfileProcess::VolumeEdit);
+        Samples=Pieces.ImpactAt(Target,VolumePoint(LocalHit),VolumePoint(LocalDirection),
+            Radius,Depth,Changed);
+    }
     LastSeparatedPieces=static_cast<int32>(Pieces.Items.size())-Before;
-    const double RefreshStarted=FPlatformTime::Seconds();
     if (!Changed.empty()) RefreshPieces(Changed);
-    const double RefreshMs=(FPlatformTime::Seconds()-RefreshStarted)*1000.0;
 
     // 加工で分離した場合も、命中点の直後にある自由破片へ運動量を渡す。
     double Nearest=0;
@@ -322,10 +328,6 @@ int32 AAp5Monster::ApplyProjectileHit(UPrimitiveComponent* HitComponent, const F
     }
 
     LastEditMilliseconds=(FPlatformTime::Seconds()-Started)*1000;
-    UE_LOG(LogTemp, Display,
-        TEXT("AP5_PROJECTILE_HIT: target=%d radius_cm=%.0f depth_cm=%.1f resistance=%.1f material=%s impulse=%.0f samples=%d separated=%d volume_edit_ms=%.2f refresh_ms=%.2f cpu_ms=%.2f"),
-        Target,Radius,Depth,Resistance,*MaterialName,ImpulseStrength,Samples,LastSeparatedPieces,
-        VolumeEditMs,RefreshMs,LastEditMilliseconds);
     return Samples;
 }
 
@@ -339,90 +341,53 @@ int32 AAp5Monster::ApplyProjectileBlast(const FVector& HitPoint, const FVector& 
     const FVector Center=LocalHit+LocalDirection*Radius*0.25f;
     const int32 Before=static_cast<int32>(Pieces.Items.size());
     std::vector<int> Changed;
-    const double VolumeEditStarted=FPlatformTime::Seconds();
-    const int32 Samples=Pieces.Blast(VolumePoint(Center),Radius,550.0,Changed);
-    const double VolumeEditMs=(FPlatformTime::Seconds()-VolumeEditStarted)*1000.0;
+    int32 Samples=0;
+    {
+        FAp5ProfileScope Profile(EAp5ProfileProcess::VolumeEdit);
+        Samples=Pieces.Blast(VolumePoint(Center),Radius,550.0,Changed);
+    }
     LastSeparatedPieces=static_cast<int32>(Pieces.Items.size())-Before;
-    const double RefreshStarted=FPlatformTime::Seconds();
     if (!Changed.empty()) RefreshPieces(Changed);
-    const double RefreshMs=(FPlatformTime::Seconds()-RefreshStarted)*1000.0;
     LastEditMilliseconds=(FPlatformTime::Seconds()-Started)*1000;
-    UE_LOG(LogTemp,Display,
-        TEXT("AP5_PROJECTILE_BLAST: radius_cm=%.0f samples=%d changed=%d separated=%d total=%d volume_edit_ms=%.2f refresh_ms=%.2f cpu_ms=%.2f"),
-        Radius,Samples,static_cast<int32>(Changed.size()),LastSeparatedPieces,
-        static_cast<int32>(Pieces.Items.size()),VolumeEditMs,RefreshMs,LastEditMilliseconds);
     return Samples;
-}
-
-void AAp5Monster::RecordProjectileSweepProfile(double Started, bool bBroadphaseRejected)
-{
-    const double ElapsedMs=(FPlatformTime::Seconds()-Started)*1000.0;
-    SweepProfileTotalMilliseconds+=ElapsedMs;
-    SweepProfileMaxMilliseconds=FMath::Max(SweepProfileMaxMilliseconds,ElapsedMs);
-    ++SweepProfileCalls;
-    if (bBroadphaseRejected) ++SweepProfileBroadphaseRejects;
-
-    const double Now=FPlatformTime::Seconds();
-    if (SweepProfileLastLogSeconds<=0.0) SweepProfileLastLogSeconds=Now;
-    if (Now-SweepProfileLastLogSeconds<1.0) return;
-
-    UE_LOG(LogTemp,Display,
-        TEXT("AP5_PROJECTILE_SWEEP_PROFILE: calls=%d broadphase_rejects=%d avg_ms=%.3f max_ms=%.3f pieces=%d"),
-        SweepProfileCalls,SweepProfileBroadphaseRejects,
-        SweepProfileCalls>0 ? SweepProfileTotalMilliseconds/SweepProfileCalls : 0.0,
-        SweepProfileMaxMilliseconds,static_cast<int32>(Pieces.Items.size()));
-    SweepProfileTotalMilliseconds=0.0;
-    SweepProfileMaxMilliseconds=0.0;
-    SweepProfileCalls=0;
-    SweepProfileBroadphaseRejects=0;
-    SweepProfileLastLogSeconds=Now;
 }
 
 bool AAp5Monster::ApplyProjectileSweep(const FVector& Start, const FVector& End, float SweepRadius,
     float ImpactRadius, bool bExplosive, float ExplosionRadius, float ImpulseStrength)
 {
-    const double Started=FPlatformTime::Seconds();
-    if ((End-Start).IsNearlyZero())
-    {
-        RecordProjectileSweepProfile(Started,true);
-        return false;
-    }
+    if ((End-Start).IsNearlyZero()) return false;
 
-    // ほとんどの飛翔フレームはモンスターから遠い。まずUEのBoundsだけで安価に除外し、
-    // 近傍に来たフレームだけ9本の体積レイへ進む。
-    FBox SegmentBounds(ForceInit);
-    SegmentBounds+=Start;
-    SegmentBounds+=End;
-    SegmentBounds=SegmentBounds.ExpandBy(SweepRadius);
     bool bNearAnyPiece=false;
-    for (UDynamicMeshComponent* Component : PieceMeshes)
     {
-        if (IsValid(Component) && SegmentBounds.Intersect(Component->Bounds.GetBox()))
+        FAp5ProfileScope Profile(EAp5ProfileProcess::ProjectileSweep);
+        FBox SegmentBounds(ForceInit);
+        SegmentBounds+=Start;
+        SegmentBounds+=End;
+        SegmentBounds=SegmentBounds.ExpandBy(SweepRadius);
+        for (UDynamicMeshComponent* Component : PieceMeshes)
         {
-            bNearAnyPiece=true;
-            break;
+            if (IsValid(Component) && SegmentBounds.Intersect(Component->Bounds.GetBox()))
+            {
+                bNearAnyPiece=true;
+                break;
+            }
         }
     }
-    if (!bNearAnyPiece)
-    {
-        RecordProjectileSweepProfile(Started,true);
-        return false;
-    }
+    if (!bNearAnyPiece) return false;
 
-    // 移動破片の姿勢同期も、近傍へ来た弾に対してだけ実施する。
     SyncPhysicsState();
-    const FVector LocalStart=GetActorTransform().InverseTransformPosition(Start);
-    const FVector LocalEnd=GetActorTransform().InverseTransformPosition(End);
 
-    double Nearest=0;
+    int32 Target=INDEX_NONE;
     Ap5Volume::Point Hit;
-    const int32 Target=Pieces.PickSwept(
-        VolumePoint(LocalStart),VolumePoint(LocalEnd),SweepRadius,Nearest,Hit);
-    if (Target<0 || !PieceMeshes.IsValidIndex(Target))
     {
-        RecordProjectileSweepProfile(Started,false);
-        return false;
+        FAp5ProfileScope Profile(EAp5ProfileProcess::ProjectileSweep);
+        const FVector LocalStart=GetActorTransform().InverseTransformPosition(Start);
+        const FVector LocalEnd=GetActorTransform().InverseTransformPosition(End);
+        double Nearest=0;
+        Target=Pieces.PickSwept(
+            VolumePoint(LocalStart),VolumePoint(LocalEnd),SweepRadius,Nearest,Hit);
     }
+    if (Target<0 || !PieceMeshes.IsValidIndex(Target)) return false;
 
     const FVector WorldHit=GetActorTransform().TransformPosition(EnginePoint(Hit));
     const FVector Direction=(End-Start).GetSafeNormal();
@@ -430,11 +395,6 @@ bool AAp5Monster::ApplyProjectileSweep(const FVector& Start, const FVector& End,
         ApplyProjectileBlast(WorldHit,Direction,ExplosionRadius);
     else
         ApplyProjectileHit(PieceMeshes[Target],WorldHit,Direction,ImpactRadius,ImpulseStrength);
-
-    UE_LOG(LogTemp,Display,
-        TEXT("AP5_PROJECTILE_VOLUME_SWEEP: target=%d sweep_radius_cm=%.1f explosive=%d"),
-        Target,SweepRadius,bExplosive ? 1 : 0);
-    RecordProjectileSweepProfile(Started,false);
     return true;
 }
 
@@ -579,6 +539,7 @@ FString AAp5Monster::ApplyJoin(const FVector& Start, const FVector& Direction)
 
 void AAp5Monster::SyncPhysicsState()
 {
+    FAp5ProfileScope Profile(EAp5ProfileProcess::PhysicsSync);
     for (int32 I = 0; I < PieceMeshes.Num(); ++I)
     {
         UDynamicMeshComponent* Component = PieceMeshes[I];
