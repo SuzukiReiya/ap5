@@ -202,9 +202,13 @@ int32 AAp5Monster::ApplyBrush(const FVector& Start, const FVector& Direction, fl
     const FVector LocalDirection = GetActorTransform().InverseTransformVectorNoScale(Direction);
     const int32 Before = static_cast<int32>(Pieces.Items.size());
     std::vector<int> Changed;
-    const int32 Samples = Pieces.Brush(
-        Ap5Volume::Point(LocalStart.X, LocalStart.Y, LocalStart.Z),
-        Ap5Volume::Point(LocalDirection.X, LocalDirection.Y, LocalDirection.Z), Radius, bRepair, Changed);
+    int32 Samples=0;
+    {
+        FAp5ProfileScope Profile(EAp5ProfileProcess::VolumeEdit);
+        Samples=Pieces.Brush(
+            Ap5Volume::Point(LocalStart.X, LocalStart.Y, LocalStart.Z),
+            Ap5Volume::Point(LocalDirection.X, LocalDirection.Y, LocalDirection.Z), Radius, bRepair, Changed);
+    }
     LastSeparatedPieces = static_cast<int32>(Pieces.Items.size()) - Before;
     if (!Changed.empty()) RefreshPieces(Changed);
     LastEditMilliseconds = (FPlatformTime::Seconds() - Started) * 1000;
@@ -270,8 +274,12 @@ int32 AAp5Monster::ApplyImpact(const FVector& Start, const FVector& Direction, f
 
     const int32 Before = static_cast<int32>(Pieces.Items.size());
     std::vector<int> Changed;
-    const int32 Samples = Pieces.Impact(
-        VolumePoint(LocalStart),VolumePoint(LocalDirection),Radius,Depth,Changed);
+    int32 Samples=0;
+    {
+        FAp5ProfileScope Profile(EAp5ProfileProcess::VolumeEdit);
+        Samples=Pieces.Impact(
+            VolumePoint(LocalStart),VolumePoint(LocalDirection),Radius,Depth,Changed);
+    }
     LastSeparatedPieces = static_cast<int32>(Pieces.Items.size()) - Before;
     if (!Changed.empty()) RefreshPieces(Changed);
     LastEditMilliseconds = (FPlatformTime::Seconds() - Started) * 1000;
@@ -411,7 +419,11 @@ int32 AAp5Monster::ApplyBlast(const FVector& Start, const FVector& Direction, fl
     const FVector Center=LocalStart+LocalDirection*static_cast<float>(HitDistance+Radius*0.35f);
     const int32 Before=static_cast<int32>(Pieces.Items.size());
     std::vector<int> Changed;
-    const int32 Samples=Pieces.Blast(VolumePoint(Center),Radius,550.0,Changed);
+    int32 Samples=0;
+    {
+        FAp5ProfileScope Profile(EAp5ProfileProcess::VolumeEdit);
+        Samples=Pieces.Blast(VolumePoint(Center),Radius,550.0,Changed);
+    }
     LastSeparatedPieces=static_cast<int32>(Pieces.Items.size())-Before;
     if (!Changed.empty()) RefreshPieces(Changed);
     LastEditMilliseconds=(FPlatformTime::Seconds()-Started)*1000;
@@ -429,7 +441,11 @@ int32 AAp5Monster::Cut(const FVector& PlanePoint, const FVector& PlaneNormal)
     const FVector P = GetActorTransform().InverseTransformPosition(PlanePoint);
     const FVector N = GetActorTransform().InverseTransformVectorNoScale(PlaneNormal);
     std::vector<int> Changed;
-    const int32 Added = Pieces.Cut(Ap5Volume::Point(P.X, P.Y, P.Z), Ap5Volume::Point(N.X, N.Y, N.Z), Changed);
+    int32 Added=0;
+    {
+        FAp5ProfileScope Profile(EAp5ProfileProcess::VolumeEdit);
+        Added=Pieces.Cut(Ap5Volume::Point(P.X, P.Y, P.Z), Ap5Volume::Point(N.X, N.Y, N.Z), Changed);
+    }
     if (Added > 0) RefreshPieces(Changed);
     LastEditMilliseconds = (FPlatformTime::Seconds() - Started) * 1000;
     UE_LOG(LogTemp, Display, TEXT("AP5_CUT: added=%d changed=%d total=%d cpu_ms=%.2f"),
@@ -515,7 +531,11 @@ FString AAp5Monster::ApplyJoin(const FVector& Start, const FVector& Direction)
     }
     const double Started = FPlatformTime::Seconds();
     const int32 Source = SelectedJoinPiece;
-    const int32 Result = Pieces.Join(Source, Target);
+    int32 Result=INDEX_NONE;
+    {
+        FAp5ProfileScope Profile(EAp5ProfileProcess::VolumeEdit);
+        Result=Pieces.Join(Source, Target);
+    }
     LastEditMilliseconds = (FPlatformTime::Seconds() - Started) * 1000;
     if (Result < 0)
     {
