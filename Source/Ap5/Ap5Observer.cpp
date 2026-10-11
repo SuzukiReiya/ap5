@@ -184,6 +184,20 @@ void AAp5Observer::PlayerTick(float DeltaTime)
             ? TEXT("右腕関節動作を開始。動いている腕を1/2/6/7で加工し、切断後は8で再接合できます。")
             : TEXT("右腕関節動作を終了し、通常の一体形状へ戻しました。");
     }
+    if (WasInputKeyJustPressed(EKeys::L))
+    {
+        bProjectileMode=false;
+        bBlastMode=false;
+        bGrabMode=false;
+        bJoinMode=false;
+        bDrawingCut=false;
+        TestMonster->EndGrab();
+        TestMonster->ClearJoinSelection();
+        const bool bEnabled=TestMonster->ToggleLegMotionTest();
+        EditStatus=bEnabled
+            ? TEXT("両脚足踏みを開始。左右脚を逆位相で股関節から振ります。動いている脚を加工できます。")
+            : TEXT("両脚足踏みを終了し、通常の一体形状へ戻しました。");
+    }
     if (!bJoinMode) TestMonster->ClearJoinSelection();
     if (WasInputKeyJustPressed(EKeys::BackSpace))
     {
@@ -314,7 +328,7 @@ void AAp5ObserverHUD::DrawHUD()
     DrawText(FString::Printf(TEXT("%s　半径 %.0f cm　P：実体弾　0：爆発弾　G：把持　7：弾痕　1：穴　2：修復　6：切断　8：接合"),
         Observer->IsProjectileMode() ? TEXT("実体弾") : (Observer->IsGrabMode() ? TEXT("把持") : (Observer->IsBlastMode() ? TEXT("爆発弾") : (Observer->IsJoinMode() ? TEXT("接合") : (Observer->IsImpactMode() ? TEXT("弾痕") : (Observer->IsCutMode() ? TEXT("切断") : (Observer->IsRepairMode() ? TEXT("修復") : TEXT("穴あけ"))))))),
         DisplayRadius), FColor::White, 24, 20);
-    DrawText(TEXT("3：細い　4：標準　5：太い　M：材質差 ON/OFF　9：右腕関節動作　Backspace：リセット"), FColor::White, 24, 44);
+    DrawText(TEXT("3：細い　4：標準　5：太い　M：材質差　9：右腕関節　L：両脚足踏み　Backspace：リセット"), FColor::White, 24, 44);
     DrawText(TEXT("右ドラッグ／矢印：回転　ホイール／PageUp・Down：ズーム　R：視点を戻す　Esc：終了"), FColor::White, 24, 68);
     DrawText(Observer->GetEditStatus(), FColor::Yellow, 24, 92);
     DrawText(TEXT("つながりを削り切ると分離・落下。本体・破片とも加工可能。修復は直近の分離・接合時の形まで。"), FColor::White, 24, 116);
