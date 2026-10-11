@@ -297,7 +297,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Scripts\BuildAndRun.ps
 - 集計ファイルは毎フレーム追記せず、30フレームごとを上限に `Saved/Logs/Ap5SlowFrameProfile.csv` へ**上書き**する。新しい低FPSフレームが無ければ書き込まない。
 - プロファイルファイル自身の書き込み時間も `プロファイラI/O` として計測する。
 
-現在のカテゴリは、弾生成、弾補助判定、物理状態同期、体積編集・連結判定、表面生成、DynamicMesh属性初期化、DynamicMesh頂点・法線追加、DynamicMesh三角形・法線対応、DynamicMeshその他、Mesh反映、衝突箱生成、衝突更新、物理衝突状態設定、物理Simulation切替、物理速度復元、コンポーネント生成、プロファイラI/O、その他（未計測）です。DynamicMesh構築時は `AP5_DYNAMIC_MESH` ログにも面数、生成頂点数、生成法線数、三角形数と各内訳時間を出力します。
+現在のカテゴリは、弾生成、弾補助判定、物理状態同期、体積編集・連結判定、表面生成、DynamicMesh属性初期化、DynamicMesh頂点・法線検索・追加、DynamicMesh三角形・法線対応、DynamicMeshその他、Mesh反映、衝突箱生成、衝突更新、物理衝突状態設定、物理Simulation切替、物理速度復元、コンポーネント生成、プロファイラI/O、その他（未計測）です。DynamicMesh構築時は `AP5_DYNAMIC_MESH` ログにも面数、入力頂点数、共有後のユニーク頂点数、再利用頂点数、三角形数と各内訳時間を出力します。隣接三角形の同一位置頂点・法線は共有し、三角形数と形状は維持したままDynamicMesh登録量を減らしています。
 
 初回計測では、低FPSフレームの平均として「物理ボディ設定 約26 ms」「表面生成 約23 ms」「Dynamic Mesh構築 約16 ms」が突出し、弾生成・補助判定・体積編集は小さいことを確認しました。このため、固定本体の再加工時に不要な物理SimulationのOFF/ONとCollisionの無効化/再有効化をやめ、物理設定を上記3区分へ分解しました。また表面法線は、各頂点で6回の三線形補間を行う方式から、最寄り格子点の中心差分へ変更して表面生成を軽量化しています。
 
