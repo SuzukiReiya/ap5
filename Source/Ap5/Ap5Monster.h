@@ -72,8 +72,10 @@ private:
     float LegMotionTime = 0.0f;
     std::vector<Ap5Volume::Ellipsoid> Shapes;
     std::vector<Ap5Volume::Ellipsoid> BodyShapes;
-    std::vector<Ap5Volume::Ellipsoid> LeftLegShapes;
-    std::vector<Ap5Volume::Ellipsoid> RightLegShapes;
+    std::vector<Ap5Volume::Ellipsoid> LeftThighShapes;
+    std::vector<Ap5Volume::Ellipsoid> LeftLowerLegShapes;
+    std::vector<Ap5Volume::Ellipsoid> RightThighShapes;
+    std::vector<Ap5Volume::Ellipsoid> RightLowerLegShapes;
     Ap5Volume::Field InitialVolume;
     Ap5Volume::PieceCollection Pieces;
 
