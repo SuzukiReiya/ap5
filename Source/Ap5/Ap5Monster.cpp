@@ -975,8 +975,13 @@ void AAp5Monster::ResetShape()
         DrivenParts[3].DriveId=4;
         DrivenParts[3].ParentDriveId=2;
 
+        // 上半身の仮支持点は腹部ではなく左右股関節側に置く。
+        // 腹部へ穴を開けただけで固定解除されてChaos物理へ移行しないようにする。
         ArticulatedReady=Pieces.ResetDrivenParts(
-            BodyVolume,DrivenParts,{Ap5Volume::Point(0,0,170)});
+            BodyVolume,DrivenParts,{
+                Ap5Volume::Point(0,-34,112),
+                Ap5Volume::Point(0,34,112)
+            });
     }
     else
     {
