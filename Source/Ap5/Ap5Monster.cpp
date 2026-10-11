@@ -784,6 +784,25 @@ bool AAp5Monster::ToggleArmMotionTest()
     return bArmMotionTest;
 }
 
+bool AAp5Monster::IsDrivenFootGrounded(int32 DriveId) const
+{
+    constexpr double FloorZ=0.0;
+    constexpr double ContactToleranceCm=8.0;
+    for (const Ap5Volume::Piece& State : Pieces.Items)
+    {
+        if (!State.Driven || State.DriveId!=DriveId) continue;
+        for (const Ap5Volume::Point& Support : State.GroundSupportPoints)
+        {
+            // 足裏点そのものが削られていれば支持には使わない。
+            if (State.Volume.Sample(Support)>=0) continue;
+            const FVector World=GetActorTransform().TransformPosition(
+                EnginePoint(State.ToWorld(Support)));
+            if (World.Z<=FloorZ+ContactToleranceCm) return true;
+        }
+    }
+    return false;
+}
+
 void AAp5Monster::UpdateLegMotion(float DeltaSeconds)
 {
     if (!bLegMotionTest) return;
@@ -800,29 +819,43 @@ void AAp5Monster::UpdateLegMotion(float DeltaSeconds)
     const float SafeDelta=FMath::Max(0.0f,DeltaSeconds);
     LegMotionTime+=SafeDelta;
 
-    bool DrivenPresent[5]={false,false,false,false,false};
-    for (const Ap5Volume::Piece& State : Pieces.Items)
+    const float Frequency=2.0f*PI/1.8f;
+    const float Phase=LegMotionTime*Frequency;
+    const float Swing=FMath::Sin(Phase);
+
+    // Swing>0では右脚、Swing<=0では左脚を接地脚とする。
+    // 位相だけで決めず、対応する足裏材料が実際に床付近へ残っていることを確認する。
+    const int32 SupportDriveId=Swing>0.0f ? 4 : 3;
+    const bool bSupportGrounded=IsDrivenFootGrounded(SupportDriveId);
+    if (SupportDriveId!=ActiveSupportDriveId)
     {
-        if (State.Driven && State.DriveId>=1 && State.DriveId<=4)
-            DrivenPresent[State.DriveId]=true;
+        ActiveSupportDriveId=SupportDriveId;
+        UE_LOG(LogTemp, Display, TEXT("AP5_WALK_SUPPORT: side=%s grounded=%d"),
+            SupportDriveId==3 ? TEXT("left") : TEXT("right"),bSupportGrounded ? 1 : 0);
     }
-    const bool bCanAdvance=DrivenPresent[1] && DrivenPresent[2]
-        && DrivenPresent[3] && DrivenPresent[4];
+
+    if (bSupportGrounded) LegSupportLossSeconds=0.0f;
+    else LegSupportLossSeconds+=SafeDelta;
+
+    // 位相切替の瞬間的な離地を誤検知しないよう120msだけ猶予する。
+    constexpr float SupportLossGraceSeconds=0.12f;
+    const bool bCanAdvance=bSupportGrounded || LegSupportLossSeconds<SupportLossGraceSeconds;
     if (bCanAdvance)
     {
         constexpr float WalkSpeedCmPerSecond=42.0f;
         LegWalkDistance+=WalkSpeedCmPerSecond*SafeDelta;
     }
-    if (bLegWalkBlocked!=!bCanAdvance)
+
+    const bool bBlockedNow=LegSupportLossSeconds>=SupportLossGraceSeconds;
+    if (bLegWalkBlocked!=bBlockedNow)
     {
-        bLegWalkBlocked=!bCanAdvance;
-        UE_LOG(LogTemp, Display, TEXT("AP5_WALK_BLOCKED: blocked=%d distance_cm=%.1f"),
-            bLegWalkBlocked ? 1 : 0,LegWalkDistance);
+        bLegWalkBlocked=bBlockedNow;
+        UE_LOG(LogTemp, Display,
+            TEXT("AP5_WALK_BLOCKED: blocked=%d support=%s distance_cm=%.1f"),
+            bLegWalkBlocked ? 1 : 0,SupportDriveId==3 ? TEXT("left") : TEXT("right"),
+            LegWalkDistance);
     }
 
-    const float Frequency=2.0f*PI/1.8f;
-    const float Phase=LegMotionTime*Frequency;
-    const float Swing=FMath::Sin(Phase);
     const float SwingSpeed=Frequency*FMath::Cos(Phase);
 
     // モデル正面は-X。接地脚と遊脚を半周期ごとに切り替えつつ本体を前へ送る。
@@ -917,6 +950,8 @@ bool AAp5Monster::ToggleLegMotionTest()
     LegMotionTime=0.0f;
     LegWalkDistance=0.0f;
     bLegWalkBlocked=false;
+    ActiveSupportDriveId=INDEX_NONE;
+    LegSupportLossSeconds=0.0f;
     ResetShape();
     UE_LOG(LogTemp, Display, TEXT("AP5_LEG_MOTION: enabled=%d walking=1"),
         bLegMotionTest ? 1 : 0);
@@ -967,6 +1002,7 @@ void AAp5Monster::ResetShape()
         DrivenParts[2].ParentAnchor=Ap5Volume::Point(0,-34,66);
         DrivenParts[2].DriveId=3;
         DrivenParts[2].ParentDriveId=1;
+        DrivenParts[2].GroundSupport=true;
 
         DrivenParts[3].Volume=std::move(RightLower);
         DrivenParts[3].JointPivot=Ap5Volume::Point(0,36,66);
@@ -974,6 +1010,7 @@ void AAp5Monster::ResetShape()
         DrivenParts[3].ParentAnchor=Ap5Volume::Point(0,34,66);
         DrivenParts[3].DriveId=4;
         DrivenParts[3].ParentDriveId=2;
+        DrivenParts[3].GroundSupport=true;
 
         // 上半身の仮支持点は腹部ではなく左右股関節側に置く。
         // 腹部へ穴を開けただけで固定解除されてChaos物理へ移行しないようにする。
@@ -1004,6 +1041,8 @@ void AAp5Monster::ResetShape()
     LegMotionTime=0.0f;
     LegWalkDistance=0.0f;
     bLegWalkBlocked=false;
+    ActiveSupportDriveId=INDEX_NONE;
+    LegSupportLossSeconds=0.0f;
     UpdateArmMotion(0.0f);
     UpdateLegMotion(0.0f);
     SetActorTickEnabled(bArmMotionTest || bLegMotionTest);
