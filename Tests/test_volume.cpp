@@ -277,6 +277,8 @@ int main()
     double SweepDistance=0;
     assert(SweepScene.Pick(Point(-100,0,0),Point(1,0,0),SweepDistance)==-1);
     Point SweepHit;
+    // 隙間は約10cm。半径4cmでは届かず、半径8cmなら中心距離判定で拾う。
+    assert(SweepScene.PickSwept(Point(-100,0,0),Point(100,0,0),4,SweepDistance,SweepHit)==-1);
     assert(SweepScene.PickSwept(Point(-100,0,0),Point(100,0,0),8,SweepDistance,SweepHit)>=0);
     assert(SweepDistance<200);
     // 逆方向と不正な射線。
