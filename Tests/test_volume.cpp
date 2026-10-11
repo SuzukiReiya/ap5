@@ -623,7 +623,11 @@ int main()
     for (size_t I=0;I<Scene.Items.size();++I)
     {
         CheckSurface(Scene.Items[I].Volume);
-        if (Scene.Items[I].Driven) Driven=static_cast<int>(I);
+        if (Scene.Items[I].Driven)
+        {
+            assert(Scene.Items[I].DriveId==0);
+            Driven=static_cast<int>(I);
+        }
         else if (Scene.Items[I].Fixed) StaticBody=static_cast<int>(I);
     }
     assert(Driven>=0 && StaticBody>=0 && Driven!=StaticBody);
@@ -649,11 +653,12 @@ int main()
     {
         if (Scene.Items[I].Driven)
         {
-            assert(Scene.Items[I].Fixed);
+            assert(Scene.Items[I].Fixed && Scene.Items[I].DriveId==0);
             DrivenAfter=static_cast<int>(I);
         }
         else if (!Scene.Items[I].Fixed && Scene.Items[I].Origin)
         {
+            assert(Scene.Items[I].DriveId==-1);
             Detached=static_cast<int>(I);
         }
     }
@@ -666,6 +671,37 @@ int main()
     assert(Scene.Items[Rejoined].Driven && Scene.Items[Rejoined].Fixed);
     CheckSurface(Scene.Items[Rejoined].Volume);
     std::cout << "関節動作：切りしろ無し分割・駆動中加工・切断時の拘束継承・速度継承・再接合を確認\n";
+
+    // 複数関節Pieceは駆動IDを別々に持てる。足踏み検証では左右脚を独立拘束する。
+    Ap5Volume::Ellipsoid WalkBodyShape,WalkLeftShape,WalkRightShape;
+    WalkBodyShape.Center=Point(0,0,120); WalkBodyShape.Radii=Point(35,45,60);
+    WalkLeftShape.Center=Point(0,-32,45); WalkLeftShape.Radii=Point(22,20,55);
+    WalkRightShape=WalkLeftShape; WalkRightShape.Center.Y=32;
+    Field WalkBody,WalkLeft,WalkRight;
+    WalkBody.InitializeUnion({WalkBodyShape});
+    WalkLeft.InitializeUnion({WalkLeftShape});
+    WalkRight.InitializeUnion({WalkRightShape});
+    std::vector<Ap5Volume::DrivenPartSetup> WalkParts(2);
+    WalkParts[0].Volume=WalkLeft;
+    WalkParts[0].JointPivot=Point(0,-32,90);
+    WalkParts[0].JointAnchor=Point(0,-32,80);
+    WalkParts[0].DriveId=1;
+    WalkParts[1].Volume=WalkRight;
+    WalkParts[1].JointPivot=Point(0,32,90);
+    WalkParts[1].JointAnchor=Point(0,32,80);
+    WalkParts[1].DriveId=2;
+    assert(Scene.ResetDrivenParts(WalkBody,WalkParts,{Point(0,0,120)}));
+    assert(Scene.Items.size()==3);
+    assert(Scene.Items[0].Fixed && !Scene.Items[0].Driven && Scene.Items[0].DriveId==-1);
+    int LeftDriven=0,RightDriven=0;
+    for (size_t I=1;I<Scene.Items.size();++I)
+    {
+        assert(Scene.Items[I].Driven && Scene.Items[I].Fixed);
+        if (Scene.Items[I].DriveId==1) ++LeftDriven;
+        if (Scene.Items[I].DriveId==2) ++RightDriven;
+    }
+    assert(LeftDriven==1 && RightDriven==1);
+    std::cout << "複数関節：固定本体＋左右独立駆動Pieceと駆動IDを確認\n";
 
     // 爆発は球状の欠損を作り、切れた自由破片だけへ外向き速度を加える。
     Field BlastField; BlastField.Initialize(Point(45,45,45));
