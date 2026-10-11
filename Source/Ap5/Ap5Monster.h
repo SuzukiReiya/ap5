@@ -8,6 +8,7 @@
 class UDynamicMeshComponent;
 class UMaterialInterface;
 class UPhysicsHandleComponent;
+class UPhysicsConstraintComponent;
 class UPrimitiveComponent;
 
 // 全身の体積から外皮・内壁・切断面を生成する検証用モンスター。
@@ -61,6 +62,9 @@ private:
     void UpdateLegMotion(float DeltaSeconds);
     bool IsDrivenFootGrounded(int32 DriveId) const;
     void CollapseWalkingBody(int32 FailedSupportDriveId);
+    void DestroyCollapseConstraints();
+    void CreateCollapseConstraint(int32 ParentIndex,int32 ChildIndex,
+        const FVector& JointWorld,float SwingLimitDegrees,float TwistLimitDegrees);
     double ImpactResistanceAt(const Ap5Volume::Point& LocalHit, FString& MaterialName) const;
     int32 SelectedJoinPiece = INDEX_NONE;
     int32 GrabbedPiece = INDEX_NONE;
@@ -94,6 +98,9 @@ private:
 
     UPROPERTY()
     TArray<TObjectPtr<UDynamicMeshComponent>> PieceMeshes;
+
+    UPROPERTY()
+    TArray<TObjectPtr<UPhysicsConstraintComponent>> CollapseConstraints;
 
     struct FVisualChunkState
     {
