@@ -790,11 +790,44 @@ void AAp5Monster::UpdateLegMotion(float DeltaSeconds)
             static_cast<int32>(Released.size()));
     }
 
-    LegMotionTime+=FMath::Max(0.0f,DeltaSeconds);
+    const float SafeDelta=FMath::Max(0.0f,DeltaSeconds);
+    LegMotionTime+=SafeDelta;
+
+    bool DrivenPresent[5]={false,false,false,false,false};
+    for (const Ap5Volume::Piece& State : Pieces.Items)
+    {
+        if (State.Driven && State.DriveId>=1 && State.DriveId<=4)
+            DrivenPresent[State.DriveId]=true;
+    }
+    const bool bCanAdvance=DrivenPresent[1] && DrivenPresent[2]
+        && DrivenPresent[3] && DrivenPresent[4];
+    if (bCanAdvance)
+    {
+        constexpr float WalkSpeedCmPerSecond=42.0f;
+        LegWalkDistance+=WalkSpeedCmPerSecond*SafeDelta;
+    }
+    if (bLegWalkBlocked!=!bCanAdvance)
+    {
+        bLegWalkBlocked=!bCanAdvance;
+        UE_LOG(LogTemp, Display, TEXT("AP5_WALK_BLOCKED: blocked=%d distance_cm=%.1f"),
+            bLegWalkBlocked ? 1 : 0,LegWalkDistance);
+    }
+
     const float Frequency=2.0f*PI/1.8f;
     const float Phase=LegMotionTime*Frequency;
     const float Swing=FMath::Sin(Phase);
     const float SwingSpeed=Frequency*FMath::Cos(Phase);
+
+    // モデル正面は-X。接地脚と遊脚を半周期ごとに切り替えつつ本体を前へ送る。
+    // 上下動は小さくし、歩行確認中も照準しやすくする。
+    const float BodyBob=1.5f*(1.0f-FMath::Cos(Phase*2.0f));
+    const float BodySway=2.5f*Swing;
+    const FVector LocalWalkOffset(-LegWalkDistance,BodySway,BodyBob);
+    FTransform WalkTransform=LegMotionOriginTransform;
+    WalkTransform.SetLocation(
+        LegMotionOriginTransform.GetLocation()
+        +LegMotionOriginTransform.TransformVectorNoScale(LocalWalkOffset));
+    SetActorTransform(WalkTransform,false,nullptr,ETeleportType::TeleportPhysics);
 
     for (int32 I=0;I<static_cast<int32>(Pieces.Items.size());++I)
     {
@@ -812,6 +845,7 @@ void AAp5Monster::UpdateLegMotion(float DeltaSeconds)
         const float LegSwing=Swing*SideSign;
         const float LegSwingSpeed=SwingSpeed*SideSign;
 
+        // 正側を遊脚、負側を接地脚として扱う。接地側はほぼ伸ばしたまま後方へ送る。
         const float HipDegrees=20.0f*LegSwing;
         const float HipSpeedDegrees=20.0f*LegSwingSpeed;
         const float HipAngle=FMath::DegreesToRadians(HipDegrees);
@@ -829,10 +863,9 @@ void AAp5Monster::UpdateLegMotion(float DeltaSeconds)
 
         if (bLeftLower || bRightLower)
         {
-            // 振り出している脚ほど膝を曲げる。0～32度の範囲で下腿だけを追加回転。
-            const float Lift=FMath::Clamp((LegSwing+1.0f)*0.5f,0.0f,1.0f);
-            const float KneeDegrees=-32.0f*Lift;
-            const float KneeSpeedDegrees=-16.0f*LegSwingSpeed;
+            const float SwingLift=FMath::Max(0.0f,LegSwing);
+            const float KneeDegrees=-36.0f*SwingLift;
+            const float KneeSpeedDegrees=LegSwing>0.0f ? -36.0f*LegSwingSpeed : 0.0f;
             const float KneeAngle=FMath::DegreesToRadians(KneeDegrees);
             const float KneeAngularSpeed=FMath::DegreesToRadians(KneeSpeedDegrees);
             const FVector KneePivot=FVector(0.0f,bLeft ? -36.0f : 36.0f,66.0f);
@@ -862,17 +895,32 @@ void AAp5Monster::UpdateLegMotion(float DeltaSeconds)
 
 bool AAp5Monster::ToggleLegMotionTest()
 {
-    bLegMotionTest=!bLegMotionTest;
-    if (bLegMotionTest) bArmMotionTest=false;
+    const bool bEnable=!bLegMotionTest;
+    if (bEnable)
+    {
+        bLegMotionTest=true;
+        bArmMotionTest=false;
+        LegMotionOriginTransform=GetActorTransform();
+    }
+    else
+    {
+        bLegMotionTest=false;
+        SetActorTransform(LegMotionOriginTransform,false,nullptr,ETeleportType::TeleportPhysics);
+    }
     LegMotionTime=0.0f;
+    LegWalkDistance=0.0f;
+    bLegWalkBlocked=false;
     ResetShape();
-    UE_LOG(LogTemp, Display, TEXT("AP5_LEG_MOTION: enabled=%d"),bLegMotionTest ? 1 : 0);
+    UE_LOG(LogTemp, Display, TEXT("AP5_LEG_MOTION: enabled=%d walking=1"),
+        bLegMotionTest ? 1 : 0);
     return bLegMotionTest;
 }
 
 void AAp5Monster::ResetShape()
 {
     EndGrab();
+    if (bLegMotionTest)
+        SetActorTransform(LegMotionOriginTransform,false,nullptr,ETeleportType::TeleportPhysics);
     ClearJoinSelection();
     for (int32 I=0;I<PieceVisualChunks.Num();++I) DestroyVisualChunks(I);
     PieceVisualChunks.Empty();
@@ -942,6 +990,8 @@ void AAp5Monster::ResetShape()
     }
     ArmMotionTime=0.0f;
     LegMotionTime=0.0f;
+    LegWalkDistance=0.0f;
+    bLegWalkBlocked=false;
     UpdateArmMotion(0.0f);
     UpdateLegMotion(0.0f);
     SetActorTickEnabled(bArmMotionTest || bLegMotionTest);
