@@ -18,21 +18,6 @@ namespace
 Ap5Volume::Point VolumePoint(const FVector& P) { return Ap5Volume::Point(P.X,P.Y,P.Z); }
 FVector EnginePoint(const Ap5Volume::Point& P) { return FVector(P.X,P.Y,P.Z); }
 
-struct FAp5SharedMeshVertex
-{
-    int32 Vertex=INDEX_NONE;
-};
-
-FIntVector MeshVertexKey(const Ap5Volume::Point& P)
-{
-    // Marching Tetrahedraで隣接セルが共有する交点を同一頂点として扱う。
-    // 1e-5 cm単位の量子化なので、5 cm格子に対して形状差は事実上無視できる。
-    constexpr double Scale=100000.0;
-    return FIntVector(
-        static_cast<int32>(std::llround(P.X*Scale)),
-        static_cast<int32>(std::llround(P.Y*Scale)),
-        static_cast<int32>(std::llround(P.Z*Scale)));
-}
 }
 
 AAp5Monster::AAp5Monster()
@@ -128,59 +113,49 @@ void AAp5Monster::RebuildMesh(int32 Index)
         Component->SetSimulatePhysics(false);
     }
 
-    std::vector<Ap5Volume::Triangle> Surface;
+    Ap5Volume::IndexedSurface Surface;
     {
         FAp5ProfileScope Profile(EAp5ProfileProcess::SurfaceBuild);
-        Surface = State.RebuildSurface();
+        Surface = State.RebuildIndexedSurface();
     }
 
     UE::Geometry::FDynamicMesh3 Mesh;
     {
-        // この形状では共有頂点ごとに法線1個で十分なので、Normal Overlayは使わず
-        // FDynamicMesh3のper-vertex normalを使う。三角形ごとの法線対応付けを省ける。
+        // 体積場側で既に共有頂点IDを確定しているため、UE側では頂点検索を行わない。
         const uint64 DynamicMeshStartedCycles=FPlatformTime::Cycles64();
-        const int32 FaceCount=static_cast<int32>(Surface.size());
 
         const uint64 VertexNormalInitStartedCycles=FPlatformTime::Cycles64();
         Mesh.EnableVertexNormals(FVector3f(0,0,1));
         const uint64 VertexNormalInitCycles=
             FPlatformTime::Cycles64()-VertexNormalInitStartedCycles;
 
-        TMap<FIntVector,FAp5SharedMeshVertex> SharedVertices;
-        SharedVertices.Reserve(FMath::Max(1,FaceCount/2));
-
         uint64 VertexNormalCycles=0;
         uint64 TriangleCycles=0;
-        for (const Ap5Volume::Triangle& Face : Surface)
+
+        const uint64 VertexNormalStartedCycles=FPlatformTime::Cycles64();
+        TArray<int32> VertexIds;
+        VertexIds.SetNumUninitialized(static_cast<int32>(Surface.Vertices.size()));
+        for (int32 I=0;I<VertexIds.Num();++I)
         {
-            int32 Vertices[3];
-
-            const uint64 VertexNormalStartedCycles=FPlatformTime::Cycles64();
-            for (int32 K = 0; K < 3; ++K)
-            {
-                const Ap5Volume::Point& P = Face.Vertices[K];
-                const FIntVector Key=MeshVertexKey(P);
-                if (const FAp5SharedMeshVertex* Existing=SharedVertices.Find(Key))
-                {
-                    Vertices[K]=Existing->Vertex;
-                    continue;
-                }
-
-                const Ap5Volume::Point& N = Face.Normals[K];
-                FAp5SharedMeshVertex Added;
-                Added.Vertex=Mesh.AppendVertex(FVector3d(P.X,P.Y,P.Z));
-                Mesh.SetVertexNormal(Added.Vertex,
-                    FVector3f(static_cast<float>(N.X),static_cast<float>(N.Y),static_cast<float>(N.Z)));
-                SharedVertices.Add(Key,Added);
-                Vertices[K]=Added.Vertex;
-            }
-            VertexNormalCycles+=FPlatformTime::Cycles64()-VertexNormalStartedCycles;
-
-            const uint64 TriangleStartedCycles=FPlatformTime::Cycles64();
-            const int32 Triangle=Mesh.AppendTriangle(Vertices[0],Vertices[1],Vertices[2]);
-            check(Triangle>=0);
-            TriangleCycles+=FPlatformTime::Cycles64()-TriangleStartedCycles;
+            const Ap5Volume::Point& P=Surface.Vertices[static_cast<size_t>(I)];
+            const Ap5Volume::Point& N=Surface.Normals[static_cast<size_t>(I)];
+            const int32 Vertex=Mesh.AppendVertex(FVector3d(P.X,P.Y,P.Z));
+            Mesh.SetVertexNormal(Vertex,
+                FVector3f(static_cast<float>(N.X),static_cast<float>(N.Y),static_cast<float>(N.Z)));
+            VertexIds[I]=Vertex;
         }
+        VertexNormalCycles+=FPlatformTime::Cycles64()-VertexNormalStartedCycles;
+
+        const uint64 TriangleStartedCycles=FPlatformTime::Cycles64();
+        for (const Ap5Volume::IndexedTriangle& Face : Surface.Triangles)
+        {
+            const int32 Triangle=Mesh.AppendTriangle(
+                VertexIds[Face.Vertices[0]],
+                VertexIds[Face.Vertices[1]],
+                VertexIds[Face.Vertices[2]]);
+            check(Triangle>=0);
+        }
+        TriangleCycles+=FPlatformTime::Cycles64()-TriangleStartedCycles;
 
         const uint64 DynamicMeshTotalCycles=FPlatformTime::Cycles64()-DynamicMeshStartedCycles;
         const uint64 MeasuredCycles=VertexNormalInitCycles+VertexNormalCycles+TriangleCycles;
