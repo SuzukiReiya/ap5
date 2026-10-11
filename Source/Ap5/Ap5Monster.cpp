@@ -803,6 +803,36 @@ bool AAp5Monster::IsDrivenFootGrounded(int32 DriveId) const
     return false;
 }
 
+void AAp5Monster::CollapseWalkingBody(int32 FailedSupportDriveId)
+{
+    if (!bLegMotionTest) return;
+
+    // モデル正面は-X、左右はY。左支持喪失なら-Y側、右なら+Y側へ倒す。
+    // X軸角速度の符号で上体の倒れる側を与える。
+    const double TipAngularSpeed=FailedSupportDriveId==3 ? 1.1 : -1.1;
+    constexpr double ForwardSpeedCmPerSecond=42.0;
+    Pieces.ReleaseAllForPhysics(
+        Ap5Volume::Point(-ForwardSpeedCmPerSecond,0,0),
+        Ap5Volume::Point(TipAngularSpeed,0,0));
+
+    bLegMotionTest=false;
+    bLegWalkBlocked=true;
+
+    for (int32 I=0;I<static_cast<int32>(Pieces.Items.size());++I)
+    {
+        if (!PieceMeshes.IsValidIndex(I)) continue;
+        // 崩落時は各体積が関節境界で重なっていても互いに押し飛ばさない。
+        // 床(WorldStatic)との衝突は維持する。
+        PieceMeshes[I]->SetCollisionResponseToChannel(ECC_PhysicsBody,ECR_Ignore);
+        RebuildMesh(I);
+    }
+
+    UE_LOG(LogTemp, Display,
+        TEXT("AP5_WALK_COLLAPSE: failed_support=%s pieces=%d distance_cm=%.1f"),
+        FailedSupportDriveId==3 ? TEXT("left") : TEXT("right"),
+        static_cast<int32>(Pieces.Items.size()),LegWalkDistance);
+}
+
 void AAp5Monster::UpdateLegMotion(float DeltaSeconds)
 {
     if (!bLegMotionTest) return;
@@ -854,6 +884,14 @@ void AAp5Monster::UpdateLegMotion(float DeltaSeconds)
             TEXT("AP5_WALK_BLOCKED: blocked=%d support=%s distance_cm=%.1f"),
             bLegWalkBlocked ? 1 : 0,SupportDriveId==3 ? TEXT("left") : TEXT("right"),
             LegWalkDistance);
+    }
+
+    // 短い接地抜けでは停止だけに留め、350ms以上支持が戻らなければ物理転倒へ移行する。
+    constexpr float CollapseDelaySeconds=0.35f;
+    if (LegSupportLossSeconds>=CollapseDelaySeconds)
+    {
+        CollapseWalkingBody(SupportDriveId);
+        return;
     }
 
     const float SwingSpeed=Frequency*FMath::Cos(Phase);
