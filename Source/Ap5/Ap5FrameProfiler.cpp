@@ -1,6 +1,7 @@
 #include "Ap5FrameProfiler.h"
 
 #include "HAL/PlatformTime.h"
+#include "Misc/App.h"
 #include "Misc/CoreDelegates.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
@@ -26,6 +27,8 @@ const TCHAR* ProcessNames[] =
     TEXT("物理速度復元"),
     TEXT("コンポーネント生成"),
     TEXT("プロファイラI/O"),
+    TEXT("FPS制限待機"),
+    TEXT("FPS制限待機超過"),
     TEXT("その他（未計測）")
 };
 static_assert(UE_ARRAY_COUNT(ProcessNames) == static_cast<int32>(EAp5ProfileProcess::Count));
@@ -69,6 +72,16 @@ void FAp5FrameProfiler::HandleEndFrame()
         WriteSummaryIfNeeded();
         FramesSinceWrite=0;
     }
+
+    // t.MaxFPS等による意図的なSleepは処理負荷ではないため、その他から分離する。
+    // IdleTimeOvershootはIdleTimeの内数なので、要求待機と超過分に分けて合計がIdleTimeになるようにする。
+    const double IdleMilliseconds=FMath::Max(0.0,FApp::GetIdleTime()*1000.0);
+    const double OvershootMilliseconds=FMath::Clamp(
+        FApp::GetIdleTimeOvershoot()*1000.0,0.0,IdleMilliseconds);
+    CurrentMilliseconds[static_cast<int32>(EAp5ProfileProcess::FrameLimiterWait)]+=
+        FMath::Max(0.0,IdleMilliseconds-OvershootMilliseconds);
+    CurrentMilliseconds[static_cast<int32>(EAp5ProfileProcess::FrameLimiterOvershoot)]+=
+        OvershootMilliseconds;
 
     const double FrameMilliseconds=
         (FPlatformTime::Seconds()-FrameStartedSeconds)*1000.0;
