@@ -54,11 +54,20 @@ struct IndexedTriangle
     int Vertices[3];
 };
 
+struct IndexedSurfaceChunk
+{
+    int X=0, Y=0, Z=0;
+    std::uint64_t Signature=1469598103934665603ull;
+    std::vector<int> Triangles;
+};
+
 struct IndexedSurface
 {
     std::vector<Point> Vertices;
     std::vector<Point> Normals;
+    std::vector<std::uint64_t> VertexSignatures;
     std::vector<IndexedTriangle> Triangles;
+    std::vector<IndexedSurfaceChunk> Chunks;
 };
 
 struct CollisionBox
@@ -514,7 +523,7 @@ public:
         return true;
     }
 
-    IndexedSurface BuildIndexedSurface() const
+    IndexedSurface BuildIndexedSurface(double ChunkSize=0.0) const
     {
         IndexedSurface Result;
         // 6四面体分割で使う辺は、格子点から +X/+Y/+Z とその組み合わせの7種類だけ。
@@ -522,7 +531,27 @@ public:
         std::vector<int> EdgeVertices(Values.size()*7,-1);
         Result.Vertices.reserve(std::max<size_t>(64,Values.size()/8));
         Result.Normals.reserve(Result.Vertices.capacity());
+        Result.VertexSignatures.reserve(Result.Vertices.capacity());
         Result.Triangles.reserve(std::max<size_t>(64,Values.size()/4));
+
+        int ChunkMinX=0,ChunkMinY=0,ChunkMinZ=0;
+        int ChunkCountX=0,ChunkCountY=0,ChunkCountZ=0;
+        std::vector<int> ChunkSlots;
+        if (ChunkSize>0.0 && !Values.empty())
+        {
+            const Point High=Origin+Point((NX-1)*Spacing,(NY-1)*Spacing,(NZ-1)*Spacing);
+            ChunkMinX=static_cast<int>(std::floor(Origin.X/ChunkSize))-1;
+            ChunkMinY=static_cast<int>(std::floor(Origin.Y/ChunkSize))-1;
+            ChunkMinZ=static_cast<int>(std::floor(Origin.Z/ChunkSize))-1;
+            const int ChunkMaxX=static_cast<int>(std::floor(High.X/ChunkSize))+1;
+            const int ChunkMaxY=static_cast<int>(std::floor(High.Y/ChunkSize))+1;
+            const int ChunkMaxZ=static_cast<int>(std::floor(High.Z/ChunkSize))+1;
+            ChunkCountX=ChunkMaxX-ChunkMinX+1;
+            ChunkCountY=ChunkMaxY-ChunkMinY+1;
+            ChunkCountZ=ChunkMaxZ-ChunkMinZ+1;
+            ChunkSlots.assign(static_cast<size_t>(
+                ChunkCountX*ChunkCountY*ChunkCountZ),-1);
+        }
 
         // 隣接セルと面の対角線が一致する6四面体分割。
         const int Corners[8][3] = {{0,0,0},{1,0,0},{1,1,0},{0,1,0},{0,0,1},{1,0,1},{1,1,1},{0,1,1}};
@@ -561,14 +590,20 @@ public:
                     const int A = NI==1 ? Inside[0] : Outside[0];
                     const int* Others = NI==1 ? Outside : Inside;
                     EmitIndexed(Result,EdgeVertices,P,V,GridIndex,
-                        A,Others[0],A,Others[1],A,Others[2],Outward);
+                        A,Others[0],A,Others[1],A,Others[2],Outward,
+                        ChunkSize,ChunkMinX,ChunkMinY,ChunkMinZ,
+                        ChunkCountX,ChunkCountY,ChunkCountZ,ChunkSlots);
                 }
                 else
                 {
                     EmitIndexed(Result,EdgeVertices,P,V,GridIndex,
-                        Inside[0],Outside[0],Inside[0],Outside[1],Inside[1],Outside[1],Outward);
+                        Inside[0],Outside[0],Inside[0],Outside[1],Inside[1],Outside[1],Outward,
+                        ChunkSize,ChunkMinX,ChunkMinY,ChunkMinZ,
+                        ChunkCountX,ChunkCountY,ChunkCountZ,ChunkSlots);
                     EmitIndexed(Result,EdgeVertices,P,V,GridIndex,
-                        Inside[0],Outside[0],Inside[1],Outside[1],Inside[1],Outside[0],Outward);
+                        Inside[0],Outside[0],Inside[1],Outside[1],Inside[1],Outside[0],Outward,
+                        ChunkSize,ChunkMinX,ChunkMinY,ChunkMinZ,
+                        ChunkCountX,ChunkCountY,ChunkCountZ,ChunkSlots);
                 }
             }
         }
@@ -634,16 +669,28 @@ private:
         if (EdgeVertices[Slot]>=0) return EdgeVertices[Slot];
 
         const Point PositionOnEdge=Intersect(P,V,A,B);
+        const Point VertexNormal=Normal(PositionOnEdge);
         const int Vertex=static_cast<int>(Result.Vertices.size());
         Result.Vertices.push_back(PositionOnEdge);
-        Result.Normals.push_back(Normal(PositionOnEdge));
+        Result.Normals.push_back(VertexNormal);
+        std::uint64_t Signature=1469598103934665603ull;
+        Signature=MixSignature(Signature,static_cast<std::int64_t>(std::llround(PositionOnEdge.X*1000.0)));
+        Signature=MixSignature(Signature,static_cast<std::int64_t>(std::llround(PositionOnEdge.Y*1000.0)));
+        Signature=MixSignature(Signature,static_cast<std::int64_t>(std::llround(PositionOnEdge.Z*1000.0)));
+        Signature=MixSignature(Signature,static_cast<std::int64_t>(std::llround(VertexNormal.X*1000000.0)));
+        Signature=MixSignature(Signature,static_cast<std::int64_t>(std::llround(VertexNormal.Y*1000000.0)));
+        Signature=MixSignature(Signature,static_cast<std::int64_t>(std::llround(VertexNormal.Z*1000000.0)));
+        Result.VertexSignatures.push_back(Signature);
         EdgeVertices[Slot]=Vertex;
         return Vertex;
     }
 
     void EmitIndexed(IndexedSurface& Result,std::vector<int>& EdgeVertices,
         const Point* P,const double* V,const int* GridIndex,
-        int A0,int B0,int A1,int B1,int A2,int B2,const Point& Outward) const
+        int A0,int B0,int A1,int B1,int A2,int B2,const Point& Outward,
+        double ChunkSize,int ChunkMinX,int ChunkMinY,int ChunkMinZ,
+        int ChunkCountX,int ChunkCountY,int ChunkCountZ,
+        std::vector<int>& ChunkSlots) const
     {
         int Vertices[3]={
             SurfaceVertex(Result,EdgeVertices,P,V,GridIndex,A0,B0),
@@ -656,7 +703,46 @@ private:
         if (Cross.Length()<1e-10) return;
         if (Cross.Dot(Outward)>0) std::swap(Vertices[1],Vertices[2]);
         IndexedTriangle Face={{Vertices[0],Vertices[1],Vertices[2]}};
+        const int TriangleIndex=static_cast<int>(Result.Triangles.size());
         Result.Triangles.push_back(Face);
+
+        if (ChunkSize>0.0 && !ChunkSlots.empty())
+        {
+            const Point Center=(P0+P1+P2)*(1.0/3.0);
+            const int CX=static_cast<int>(std::floor(Center.X/ChunkSize));
+            const int CY=static_cast<int>(std::floor(Center.Y/ChunkSize));
+            const int CZ=static_cast<int>(std::floor(Center.Z/ChunkSize));
+            const int LX=CX-ChunkMinX,LY=CY-ChunkMinY,LZ=CZ-ChunkMinZ;
+            if (LX>=0 && LX<ChunkCountX && LY>=0 && LY<ChunkCountY
+                && LZ>=0 && LZ<ChunkCountZ)
+            {
+                const int Slot=LX+ChunkCountX*(LY+ChunkCountY*LZ);
+                int ChunkIndex=ChunkSlots[static_cast<size_t>(Slot)];
+                if (ChunkIndex<0)
+                {
+                    ChunkIndex=static_cast<int>(Result.Chunks.size());
+                    ChunkSlots[static_cast<size_t>(Slot)]=ChunkIndex;
+                    IndexedSurfaceChunk Chunk;
+                    Chunk.X=CX; Chunk.Y=CY; Chunk.Z=CZ;
+                    Chunk.Triangles.reserve(256);
+                    Result.Chunks.push_back(std::move(Chunk));
+                }
+                IndexedSurfaceChunk& Chunk=Result.Chunks[static_cast<size_t>(ChunkIndex)];
+                Chunk.Triangles.push_back(TriangleIndex);
+                Chunk.Signature=MixSignature(Chunk.Signature,
+                    static_cast<std::int64_t>(Result.VertexSignatures[Vertices[0]]));
+                Chunk.Signature=MixSignature(Chunk.Signature,
+                    static_cast<std::int64_t>(Result.VertexSignatures[Vertices[1]]));
+                Chunk.Signature=MixSignature(Chunk.Signature,
+                    static_cast<std::int64_t>(Result.VertexSignatures[Vertices[2]]));
+            }
+        }
+    }
+
+    static std::uint64_t MixSignature(std::uint64_t Hash,std::int64_t Value)
+    {
+        const std::uint64_t Bits=static_cast<std::uint64_t>(Value);
+        return Hash^(Bits+0x9e3779b97f4a7c15ull+(Hash<<6)+(Hash>>2));
     }
 
     Point Normal(const Point& P) const
