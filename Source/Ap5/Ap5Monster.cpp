@@ -10,6 +10,7 @@
 #include "HAL/PlatformTime.h"
 #include "PhysicsEngine/AggregateGeom.h"
 #include "PhysicsEngine/PhysicsHandleComponent.h"
+#include "PhysicsEngine/PhysicsConstraintComponent.h"
 #include "Math/RotationMatrix.h"
 #include "UObject/ConstructorHelpers.h"
 
@@ -803,12 +804,84 @@ bool AAp5Monster::IsDrivenFootGrounded(int32 DriveId) const
     return false;
 }
 
+void AAp5Monster::DestroyCollapseConstraints()
+{
+    for (UPhysicsConstraintComponent* Constraint : CollapseConstraints)
+        if (IsValid(Constraint)) Constraint->DestroyComponent();
+    CollapseConstraints.Empty();
+}
+
+void AAp5Monster::CreateCollapseConstraint(
+    int32 ParentIndex,int32 ChildIndex,const FVector& JointWorld,
+    float SwingLimitDegrees,float TwistLimitDegrees)
+{
+    if (!PieceMeshes.IsValidIndex(ParentIndex) || !PieceMeshes.IsValidIndex(ChildIndex)) return;
+    UDynamicMeshComponent* Parent=PieceMeshes[ParentIndex];
+    UDynamicMeshComponent* Child=PieceMeshes[ChildIndex];
+    if (!IsValid(Parent) || !IsValid(Child)
+        || !Parent->IsSimulatingPhysics() || !Child->IsSimulatingPhysics()) return;
+
+    UPhysicsConstraintComponent* Constraint=NewObject<UPhysicsConstraintComponent>(this);
+    AddInstanceComponent(Constraint);
+    Constraint->SetupAttachment(RootComponent);
+    Constraint->SetMobility(EComponentMobility::Movable);
+    Constraint->SetWorldLocation(JointWorld);
+    Constraint->SetDisableCollision(true);
+
+    // 関節位置は固定し、角度だけを制限付きで許容する簡易ラグドール。
+    Constraint->SetLinearXLimit(LCM_Locked,0.0f);
+    Constraint->SetLinearYLimit(LCM_Locked,0.0f);
+    Constraint->SetLinearZLimit(LCM_Locked,0.0f);
+    Constraint->SetAngularSwing1Limit(ACM_Limited,SwingLimitDegrees);
+    Constraint->SetAngularSwing2Limit(ACM_Limited,SwingLimitDegrees);
+    Constraint->SetAngularTwistLimit(ACM_Limited,TwistLimitDegrees);
+    Constraint->RegisterComponent();
+    Constraint->SetConstrainedComponents(Parent,NAME_None,Child,NAME_None);
+    CollapseConstraints.Add(Constraint);
+}
+
 void AAp5Monster::CollapseWalkingBody(int32 FailedSupportDriveId)
 {
     if (!bLegMotionTest) return;
 
+    int32 BodyIndex=INDEX_NONE;
+    int32 LeftThighIndex=INDEX_NONE;
+    int32 RightThighIndex=INDEX_NONE;
+    int32 LeftLowerIndex=INDEX_NONE;
+    int32 RightLowerIndex=INDEX_NONE;
+    for (int32 I=0;I<static_cast<int32>(Pieces.Items.size());++I)
+    {
+        const Ap5Volume::Piece& P=Pieces.Items[I];
+        if (!P.Driven && BodyIndex==INDEX_NONE) BodyIndex=I;
+        else if (P.DriveId==1) LeftThighIndex=I;
+        else if (P.DriveId==2) RightThighIndex=I;
+        else if (P.DriveId==3) LeftLowerIndex=I;
+        else if (P.DriveId==4) RightLowerIndex=I;
+    }
+
+    // Constraint位置は物理自由化前の関節姿勢から求める。
+    FVector LeftHipWorld=FVector::ZeroVector;
+    FVector RightHipWorld=FVector::ZeroVector;
+    FVector LeftKneeWorld=FVector::ZeroVector;
+    FVector RightKneeWorld=FVector::ZeroVector;
+    if (LeftThighIndex!=INDEX_NONE)
+        LeftHipWorld=GetActorTransform().TransformPosition(
+            EnginePoint(Pieces.Items[LeftThighIndex].ToWorld(
+                Ap5Volume::Point(0,-34,118))));
+    if (RightThighIndex!=INDEX_NONE)
+        RightHipWorld=GetActorTransform().TransformPosition(
+            EnginePoint(Pieces.Items[RightThighIndex].ToWorld(
+                Ap5Volume::Point(0,34,118))));
+    if (LeftLowerIndex!=INDEX_NONE)
+        LeftKneeWorld=GetActorTransform().TransformPosition(
+            EnginePoint(Pieces.Items[LeftLowerIndex].ToWorld(
+                Ap5Volume::Point(0,-36,66))));
+    if (RightLowerIndex!=INDEX_NONE)
+        RightKneeWorld=GetActorTransform().TransformPosition(
+            EnginePoint(Pieces.Items[RightLowerIndex].ToWorld(
+                Ap5Volume::Point(0,36,66))));
+
     // モデル正面は-X、左右はY。左支持喪失なら-Y側、右なら+Y側へ倒す。
-    // X軸角速度の符号で上体の倒れる側を与える。
     const double TipAngularSpeed=FailedSupportDriveId==3 ? 1.1 : -1.1;
     constexpr double ForwardSpeedCmPerSecond=42.0;
     Pieces.ReleaseAllForPhysics(
@@ -817,20 +890,25 @@ void AAp5Monster::CollapseWalkingBody(int32 FailedSupportDriveId)
 
     bLegMotionTest=false;
     bLegWalkBlocked=true;
+    DestroyCollapseConstraints();
 
     for (int32 I=0;I<static_cast<int32>(Pieces.Items.size());++I)
     {
         if (!PieceMeshes.IsValidIndex(I)) continue;
-        // 崩落時は各体積が関節境界で重なっていても互いに押し飛ばさない。
-        // 床(WorldStatic)との衝突は維持する。
-        PieceMeshes[I]->SetCollisionResponseToChannel(ECC_PhysicsBody,ECR_Ignore);
         RebuildMesh(I);
     }
 
+    // Chaosへ移した後に股関節・膝関節をConstraintで接続する。
+    // 破壊済みで対応Pieceが存在しない関節は作らない。
+    CreateCollapseConstraint(BodyIndex,LeftThighIndex,LeftHipWorld,55.0f,35.0f);
+    CreateCollapseConstraint(BodyIndex,RightThighIndex,RightHipWorld,55.0f,35.0f);
+    CreateCollapseConstraint(LeftThighIndex,LeftLowerIndex,LeftKneeWorld,45.0f,20.0f);
+    CreateCollapseConstraint(RightThighIndex,RightLowerIndex,RightKneeWorld,45.0f,20.0f);
+
     UE_LOG(LogTemp, Display,
-        TEXT("AP5_WALK_COLLAPSE: failed_support=%s pieces=%d distance_cm=%.1f"),
+        TEXT("AP5_WALK_COLLAPSE: failed_support=%s pieces=%d constraints=%d distance_cm=%.1f"),
         FailedSupportDriveId==3 ? TEXT("left") : TEXT("right"),
-        static_cast<int32>(Pieces.Items.size()),LegWalkDistance);
+        static_cast<int32>(Pieces.Items.size()),CollapseConstraints.Num(),LegWalkDistance);
 }
 
 void AAp5Monster::UpdateLegMotion(float DeltaSeconds)
@@ -999,6 +1077,7 @@ bool AAp5Monster::ToggleLegMotionTest()
 void AAp5Monster::ResetShape()
 {
     EndGrab();
+    DestroyCollapseConstraints();
     if (bLegMotionTest)
         SetActorTransform(LegMotionOriginTransform,false,nullptr,ETeleportType::TeleportPhysics);
     ClearJoinSelection();
