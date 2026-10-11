@@ -701,12 +701,14 @@ int main()
     WalkParts[2].ParentAnchor=Point(0,-32,50);
     WalkParts[2].DriveId=3;
     WalkParts[2].ParentDriveId=1;
+    WalkParts[2].GroundSupport=true;
     WalkParts[3].Volume=WalkRightLower;
     WalkParts[3].JointPivot=Point(0,32,52);
     WalkParts[3].JointAnchor=Point(0,32,50);
     WalkParts[3].ParentAnchor=Point(0,32,50);
     WalkParts[3].DriveId=4;
     WalkParts[3].ParentDriveId=2;
+    WalkParts[3].GroundSupport=true;
     assert(Scene.ResetDrivenParts(WalkBody,WalkParts,{Point(0,0,120)}));
     assert(Scene.Items.size()==5);
     assert(Scene.Items[0].Fixed && !Scene.Items[0].Driven && Scene.Items[0].DriveId==-1);
@@ -727,6 +729,21 @@ int main()
         ++DriveCount[Scene.Items[I].DriveId];
     }
     for (int I=1;I<=4;++I) assert(DriveCount[I]==1);
+
+    // 下腿だけが足裏支持点を保持し、支持点は現在の材料に含まれている。
+    for (size_t I=1;I<Scene.Items.size();++I)
+    {
+        const Ap5Volume::Piece& P=Scene.Items[I];
+        if (P.DriveId==3 || P.DriveId==4)
+        {
+            assert(!P.GroundSupportPoints.empty());
+            bool HasMaterialSupport=false;
+            for (const Point& S : P.GroundSupportPoints)
+                HasMaterialSupport=HasMaterialSupport || P.Volume.Sample(S)<0;
+            assert(HasMaterialSupport);
+        }
+        else assert(P.GroundSupportPoints.empty());
+    }
 
     // 左大腿の膝側アンカーだけを削ると、左下腿だけが親接続を失って自由化する。
     int LeftThighIndex=-1,LeftLowerIndex=-1,RightLowerIndex=-1;
