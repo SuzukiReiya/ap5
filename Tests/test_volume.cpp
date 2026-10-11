@@ -54,8 +54,22 @@ int main()
     CheckSurface(Volume);
     const Ap5Volume::IndexedSurface Indexed=Volume.BuildIndexedSurface();
     assert(!Indexed.Vertices.empty() && Indexed.Vertices.size()==Indexed.Normals.size());
+    assert(Indexed.Vertices.size()==Indexed.VertexSignatures.size());
     assert(!Indexed.Triangles.empty());
     assert(Indexed.Vertices.size()<Indexed.Triangles.size()*3);
+
+    const Ap5Volume::IndexedSurface Chunked=Volume.BuildIndexedSurface(80.0);
+    assert(!Chunked.Chunks.empty());
+    size_t ChunkTriangleCount=0;
+    for (const Ap5Volume::IndexedSurfaceChunk& Chunk : Chunked.Chunks)
+    {
+        assert(!Chunk.Triangles.empty());
+        ChunkTriangleCount+=Chunk.Triangles.size();
+        for (int TriangleIndex : Chunk.Triangles)
+            assert(TriangleIndex>=0
+                && TriangleIndex<static_cast<int>(Chunked.Triangles.size()));
+    }
+    assert(ChunkTriangleCount==Chunked.Triangles.size());
     for (const Ap5Volume::IndexedTriangle& Face : Indexed.Triangles)
         for (int K=0;K<3;++K)
             assert(Face.Vertices[K]>=0
