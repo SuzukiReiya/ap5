@@ -293,13 +293,14 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Scripts\BuildAndRun.ps
 - 50 FPS未満、つまり1フレームが20 msを超えたフレームだけを集計対象にする。
 - 各対象フレームで、処理カテゴリごとの合計時間を求める。同じ処理が1フレーム内で複数回呼ばれた場合は合算する。その処理が走らなかった低FPSフレームは0 msとして平均・最小へ含める。
 - 各カテゴリについて、対象フレームにおける処理時間の**平均・最小・最大**だけをゲーム内部に保持する。イベント名、フレーム番号、着弾回数などは保存しない。
-- 計測対象外の時間は `その他（未計測）` として、OnBeginFrame→OnEndFrameのCPU時間から計測済み処理時間を引いて求める。UE本体、Chaos、ゲームスレッド上の未分類処理などが支配的な場合の目安になる。フレーム末尾から次フレーム開始までの待機時間は含めない。
+- `t.MaxFPS=60` 等による意図的な待機は `FPS制限待機`、OSスリープの超過分は `FPS制限待機超過` として分離する。両者の合計は `FApp::GetIdleTime()` と一致する。
+- 計測対象外の時間は `その他（未計測）` として、OnBeginFrame→OnEndFrameの実時間から、計測済み処理時間とFPS制限待機を引いて求める。これによりUE本体、Chaos、ゲームスレッド上の未分類処理などが支配的な場合の目安にする。
 - 集計ファイルは毎フレーム追記せず、30フレームごとを上限に `Saved/Logs/Ap5SlowFrameProfile.csv` へ**上書き**する。新しい低FPSフレームが無ければ書き込まない。
 - プロファイルファイル自身の書き込み時間も `プロファイラI/O` として計測する。
 
-現在のカテゴリは、弾生成、弾補助判定、物理状態同期、体積編集・連結判定、表面生成、DynamicMesh頂点法線初期化、DynamicMesh頂点追加・法線設定、DynamicMesh三角形追加、DynamicMeshその他、Mesh反映、衝突箱生成、衝突更新、物理衝突状態設定、物理Simulation切替、物理速度復元、コンポーネント生成、プロファイラI/O、その他（未計測）です。隣接三角形の共有頂点IDを体積場のMarching Tetrahedra生成時に確定し、そのIndexed SurfaceをそのままDynamicMeshへ渡します。UE側でのTMap頂点検索を廃止し、法線はper-vertex normalとして保持します。
+現在のカテゴリは、弾生成、弾補助判定、物理状態同期、体積編集・連結判定、表面生成、DynamicMesh頂点法線初期化、DynamicMesh頂点追加・法線設定、DynamicMesh三角形追加、DynamicMeshその他、Mesh反映、衝突箱生成、衝突更新、物理衝突状態設定、物理Simulation切替、物理速度復元、コンポーネント生成、プロファイラI/O、FPS制限待機、FPS制限待機超過、その他（未計測）です。隣接三角形の共有頂点IDを体積場のMarching Tetrahedra生成時に確定し、そのIndexed SurfaceをそのままDynamicMeshへ渡します。UE側でのTMap頂点検索を廃止し、法線はper-vertex normalとして保持します。
 
-初回計測では、低FPSフレームの平均として「物理ボディ設定 約26 ms」「表面生成 約23 ms」「Dynamic Mesh構築 約16 ms」が突出し、弾生成・補助判定・体積編集は小さいことを確認しました。最適化後は弾補助判定が約0.001 ms、物理設定系が平均0.3 ms未満まで低下しました。Indexed Surfaceを直接DynamicMeshへ渡す方式では、頂点追加・法線設定が約0.29 ms、三角形追加が約2.29 ms、表面生成が約5.65 msまで低下しました。一方で `その他（未計測）` が平均約15.6 ms・最大約151.7 msと大きくなったため、PlayerTick開始間隔による旧フレーム計測をやめ、OnBeginFrame→OnEndFrameのCPU処理時間へ変更して待機時間との混同を除外しています。
+初回計測では、低FPSフレームの平均として「物理ボディ設定 約26 ms」「表面生成 約23 ms」「Dynamic Mesh構築 約16 ms」が突出し、弾生成・補助判定・体積編集は小さいことを確認しました。最適化後は弾補助判定が約0.001 ms、物理設定系が平均0.3 ms未満まで低下しました。Indexed Surfaceを直接DynamicMeshへ渡す方式では、頂点追加・法線設定が約0.29 ms、三角形追加が約2.29 ms、表面生成が約5.65 msまで低下しました。一方で `その他（未計測）` が大きく残りました。確認するとAP5は `t.MaxFPS=60` で、UEの最大FPS制御によるSleepもOnBeginFrame→OnEndFrameに含まれるため、`FApp::GetIdleTime()` と `GetIdleTimeOvershoot()` を用いて意図的な待機と待機超過を別カテゴリへ分離しています。これにより、次回以降の `その他（未計測）` は実際の未分類CPU処理へ近づきます。
 
 CSVは各カテゴリにつき次の3値だけを保持します。
 
