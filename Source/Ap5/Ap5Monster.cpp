@@ -238,7 +238,7 @@ void AAp5Monster::UpdateVisualChunks(int32 Index,const Ap5Volume::IndexedSurface
     // 消えたチャンクだけ破棄する。
     TArray<FIntVector> Removed;
     for (const TPair<FIntVector,FVisualChunkState>& Pair : Existing)
-        if (!PresentChunks.Contains(Key)) Removed.Add(Key);
+        if (!PresentChunks.Contains(Pair.Key)) Removed.Add(Pair.Key);
     for (const FIntVector& Key : Removed)
     {
         if (FVisualChunkState* State=Existing.Find(Key))
@@ -268,7 +268,7 @@ void AAp5Monster::UpdateVisualChunks(int32 Index,const Ap5Volume::IndexedSurface
         }
 
         TMap<int32,int32> VertexRemap;
-        VertexRemap.Reserve(SurfaceChunk.Triangles.Num()*2);
+        VertexRemap.Reserve(static_cast<int32>(SurfaceChunk.Triangles.size()*2));
 
         for (int32 SurfaceTriangleIndex : SurfaceChunk.Triangles)
         {
