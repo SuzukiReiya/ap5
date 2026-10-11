@@ -14,6 +14,11 @@ on:
 permissions:
   contents: read
 
+# 1台のself-hosted PCで中間コミットを順番待ちしない。最新mainだけを検証する。
+concurrency:
+  group: ue-self-hosted-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   ue-build:
     name: UE 5.6 Windows build
