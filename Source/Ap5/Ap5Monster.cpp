@@ -770,7 +770,14 @@ void AAp5Monster::Tick(float DeltaSeconds)
 bool AAp5Monster::ToggleArmMotionTest()
 {
     bArmMotionTest=!bArmMotionTest;
-    if (bArmMotionTest) bLegMotionTest=false;
+    if (bArmMotionTest && bLegMotionTest)
+    {
+        bLegMotionTest=false;
+        SetActorTransform(LegMotionOriginTransform,false,nullptr,ETeleportType::TeleportPhysics);
+        LegMotionTime=0.0f;
+        LegWalkDistance=0.0f;
+        bLegWalkBlocked=false;
+    }
     ArmMotionTime=0.0f;
     ResetShape();
     UE_LOG(LogTemp, Display, TEXT("AP5_ARM_MOTION: enabled=%d"), bArmMotionTest ? 1 : 0);
