@@ -763,6 +763,20 @@ int main()
     assert(Scene.Items[RightLowerIndex].Driven && Scene.Items[RightLowerIndex].DriveId==4);
     std::cout << "複数関節：左右の股関節＋膝関節と親接続喪失時の下腿自由化を確認\n";
 
+    // 支持喪失後の転倒では全Pieceを自由化し、歩行速度・転倒角速度を引き継ぐ。
+    Scene.ResetDrivenParts(WalkBody,WalkParts,{Point(0,-30,120),Point(0,30,120)});
+    assert(Scene.Items.size()==5);
+    Scene.Items[1].OriginVelocity=Point(0,5,0);
+    Scene.ReleaseAllForPhysics(Point(-42,0,0),Point(1.1,0,0));
+    for (const Ap5Volume::Piece& P : Scene.Items)
+    {
+        assert(!P.Fixed && !P.Driven && P.DriveId==-1 && P.ParentDriveId==-1);
+        assert(P.OriginVelocity.X==-42);
+        assert(P.AngularVelocity.X==1.1);
+    }
+    assert(Scene.Items[1].OriginVelocity.Y==5);
+    std::cout << "歩行転倒：支持喪失時の全Piece自由化・前進速度・転倒角速度継承を確認\n";
+
     // 爆発は球状の欠損を作り、切れた自由破片だけへ外向き速度を加える。
     Field BlastField; BlastField.Initialize(Point(45,45,45));
     const int BlastBefore=BlastField.MaterialCount();
