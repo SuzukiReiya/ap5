@@ -70,6 +70,9 @@ private:
     FString LastImpactMaterialText = TEXT("材質差OFF：標準 深さ8.0 cm");
     float ArmMotionTime = 0.0f;
     float LegMotionTime = 0.0f;
+    float LegWalkDistance = 0.0f;
+    bool bLegWalkBlocked = false;
+    FTransform LegMotionOriginTransform = FTransform::Identity;
     std::vector<Ap5Volume::Ellipsoid> Shapes;
     std::vector<Ap5Volume::Ellipsoid> BodyShapes;
     std::vector<Ap5Volume::Ellipsoid> LeftThighShapes;
