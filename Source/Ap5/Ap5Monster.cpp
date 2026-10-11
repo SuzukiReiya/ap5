@@ -18,7 +18,7 @@ namespace
 Ap5Volume::Point VolumePoint(const FVector& P) { return Ap5Volume::Point(P.X,P.Y,P.Z); }
 FVector EnginePoint(const Ap5Volume::Point& P) { return FVector(P.X,P.Y,P.Z); }
 
-constexpr double RenderChunkSizeCm = 80.0;
+constexpr double RenderChunkSizeCm = 120.0;
 
 }
 
