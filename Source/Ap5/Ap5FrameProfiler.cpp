@@ -1,6 +1,7 @@
 #include "Ap5FrameProfiler.h"
 
 #include "HAL/PlatformTime.h"
+#include "Misc/CoreDelegates.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 
@@ -36,34 +37,48 @@ FAp5FrameProfiler& FAp5FrameProfiler::Get()
     return Instance;
 }
 
-void FAp5FrameProfiler::BeginFrame()
+FAp5FrameProfiler::FAp5FrameProfiler()
 {
-    const double Now=FPlatformTime::Seconds();
-    if (!bStarted)
-    {
-        // BeginPlay等、計測開始前に発生した処理は初回フレーム統計へ混ぜない。
-        for (double& Value : CurrentMilliseconds) Value=0.0;
-        PreviousFrameBoundarySeconds=Now;
-        bStarted=true;
-        return;
-    }
+    BeginFrameHandle=FCoreDelegates::OnBeginFrame.AddRaw(
+        this,&FAp5FrameProfiler::HandleBeginFrame);
+    EndFrameHandle=FCoreDelegates::OnEndFrame.AddRaw(
+        this,&FAp5FrameProfiler::HandleEndFrame);
+}
 
-    const double FrameMilliseconds=(Now-PreviousFrameBoundarySeconds)*1000.0;
-    FinalizeCurrentFrame(FrameMilliseconds);
+FAp5FrameProfiler::~FAp5FrameProfiler()
+{
+    FCoreDelegates::OnBeginFrame.Remove(BeginFrameHandle);
+    FCoreDelegates::OnEndFrame.Remove(EndFrameHandle);
+}
+
+void FAp5FrameProfiler::HandleBeginFrame()
+{
     for (double& Value : CurrentMilliseconds) Value=0.0;
-    PreviousFrameBoundarySeconds=Now;
+    FrameStartedSeconds=FPlatformTime::Seconds();
+    bFrameOpen=true;
+}
+
+void FAp5FrameProfiler::HandleEndFrame()
+{
+    if (!bFrameOpen) return;
 
     ++FramesSinceWrite;
-    if (FramesSinceWrite >= FileWriteIntervalFrames)
+    if (FramesSinceWrite>=FileWriteIntervalFrames)
     {
+        // I/O時間も現在フレームへ含めてからフレームを確定する。
         WriteSummaryIfNeeded();
         FramesSinceWrite=0;
     }
+
+    const double FrameMilliseconds=
+        (FPlatformTime::Seconds()-FrameStartedSeconds)*1000.0;
+    FinalizeCurrentFrame(FrameMilliseconds);
+    bFrameOpen=false;
 }
 
 void FAp5FrameProfiler::AddMilliseconds(EAp5ProfileProcess Process, double Milliseconds)
 {
-    if (!bStarted) return;
+    if (!bFrameOpen) return;
     const int32 Index=static_cast<int32>(Process);
     if (Index<0 || Index>=static_cast<int32>(EAp5ProfileProcess::Count)) return;
     CurrentMilliseconds[Index]+=FMath::Max(0.0,Milliseconds);
