@@ -21,6 +21,8 @@ struct Piece
     bool Fixed=false;
     // Drivenは関節から拘束されている塊。JointAnchorを失った子は自由破片になる。
     bool Driven=false;
+    // 駆動部位を識別する。-1は非駆動、0は従来の右腕、1/2は左右脚。
+    int DriveId=-1;
     Point JointPivot, JointAnchor;
 
     Point Translation;
@@ -54,6 +56,13 @@ struct Piece
         if (!Fixed) Motion.Landed=false;
         return Mesh;
     }
+};
+
+struct DrivenPartSetup
+{
+    Field Volume;
+    Point JointPivot, JointAnchor;
+    int DriveId=-1;
 };
 
 class PieceCollection
@@ -105,9 +114,46 @@ public:
             Piece Part;
             Part.Volume=std::move(Parts[I]);
             Part.Driven=(I==DrivenIndex);
+            Part.DriveId=Part.Driven ? 0 : -1;
             Part.Fixed=Part.Driven || HasStableSupport(Part.Volume);
             Part.JointPivot=JointPivot;
             Part.JointAnchor=JointAnchor;
+            Items.push_back(std::move(Part));
+        }
+        return true;
+    }
+
+    // 複数の独立した関節Pieceを検証するための初期化。
+    // 本体は明示支持点で固定し、各駆動部位はJointAnchorを保持している間だけ拘束する。
+    bool ResetDrivenParts(const Field& Body,const std::vector<DrivenPartSetup>& DrivenParts,
+        const std::vector<Point>& BodySupports)
+    {
+        if (Body.MaterialCount()==0 || DrivenParts.empty() || BodySupports.empty()) return false;
+        SupportUsesStability=false;
+        SupportPoints=BodySupports;
+        Items.clear();
+
+        Piece Root;
+        Root.Volume=Body;
+        Root.Fixed=HasSupport(Root.Volume);
+        if (!Root.Fixed) return false;
+        Items.push_back(std::move(Root));
+
+        for (const DrivenPartSetup& Setup : DrivenParts)
+        {
+            if (Setup.Volume.MaterialCount()==0 || Setup.DriveId<0
+                || Setup.Volume.Sample(Setup.JointAnchor)>=0)
+            {
+                Items.clear();
+                return false;
+            }
+            Piece Part;
+            Part.Volume=Setup.Volume;
+            Part.Driven=true;
+            Part.DriveId=Setup.DriveId;
+            Part.Fixed=true;
+            Part.JointPivot=Setup.JointPivot;
+            Part.JointAnchor=Setup.JointAnchor;
             Items.push_back(std::move(Part));
         }
         return true;
@@ -417,6 +463,7 @@ private:
         ParentState.Origin=NewOrigin;
         ParentState.Motion=Items[Index].Motion;
         ParentState.Driven=Items[Index].Driven;
+        ParentState.DriveId=Items[Index].DriveId;
         ParentState.JointPivot=Items[Index].JointPivot;
         ParentState.JointAnchor=Items[Index].JointAnchor;
         ParentState.Translation=Items[Index].Translation;
@@ -428,6 +475,7 @@ private:
         Items[Index].Volume=std::move(Parts[Largest]);
         Items[Index].Origin=NewOrigin;
         Items[Index].Driven=ParentState.Driven && Items[Index].Volume.Sample(ParentState.JointAnchor)<0;
+        Items[Index].DriveId=Items[Index].Driven ? ParentState.DriveId : -1;
         Items[Index].JointPivot=ParentState.JointPivot;
         Items[Index].JointAnchor=ParentState.JointAnchor;
         Items[Index].Fixed=ParentFixed
@@ -441,6 +489,7 @@ private:
             Piece Child=ParentState;
             Child.Volume=std::move(Parts[J]);
             Child.Driven=ParentState.Driven && Child.Volume.Sample(ParentState.JointAnchor)<0;
+            Child.DriveId=Child.Driven ? ParentState.DriveId : -1;
             Child.Fixed=ParentFixed
                 && (ParentState.Driven ? Child.Driven : HasStableSupport(Child.Volume));
             Child.Motion.Landed=false;
