@@ -33,9 +33,9 @@ struct Piece
     Point ToWorld(const Point& Local) const { return ToWorldVector(Local)+Translation+Point(0,0,Motion.OffsetZ); }
     Point VelocityAt(const Point& World) const { return OriginVelocity+AngularVelocity.Cross(World-ToWorld(Point())); }
 
-    IndexedSurface RebuildIndexedSurface()
+    IndexedSurface RebuildIndexedSurface(double ChunkSize=0.0)
     {
-        IndexedSurface Mesh=Volume.BuildIndexedSurface();
+        IndexedSurface Mesh=Volume.BuildIndexedSurface(ChunkSize);
         double MinimumZ=1e9;
         for (const Point& P : Mesh.Vertices) MinimumZ=std::min(MinimumZ,P.Z);
         Motion.MinimumZ=Mesh.Vertices.empty() ? 0 : MinimumZ;
