@@ -21,7 +21,6 @@ FVector EnginePoint(const Ap5Volume::Point& P) { return FVector(P.X,P.Y,P.Z); }
 struct FAp5SharedMeshVertex
 {
     int32 Vertex=INDEX_NONE;
-    int32 Normal=INDEX_NONE;
 };
 
 FIntVector MeshVertexKey(const Ap5Volume::Point& P)
@@ -137,27 +136,24 @@ void AAp5Monster::RebuildMesh(int32 Index)
 
     UE::Geometry::FDynamicMesh3 Mesh;
     {
-        // 以前は各三角形ごとに3頂点・3法線を必ず新規生成していたため、
-        // 隣接三角形が共有する交点をTMapで再利用する。
-        // 形状・三角形数は変えず、DynamicMeshへ登録する頂点数だけを削減する。
+        // この形状では共有頂点ごとに法線1個で十分なので、Normal Overlayは使わず
+        // FDynamicMesh3のper-vertex normalを使う。三角形ごとの法線対応付けを省ける。
         const uint64 DynamicMeshStartedCycles=FPlatformTime::Cycles64();
         const int32 FaceCount=static_cast<int32>(Surface.size());
 
-        const uint64 AttributesStartedCycles=FPlatformTime::Cycles64();
-        Mesh.EnableAttributes();
-        const uint64 AttributesCycles=FPlatformTime::Cycles64()-AttributesStartedCycles;
+        const uint64 VertexNormalInitStartedCycles=FPlatformTime::Cycles64();
+        Mesh.EnableVertexNormals(FVector3f(0,0,1));
+        const uint64 VertexNormalInitCycles=
+            FPlatformTime::Cycles64()-VertexNormalInitStartedCycles;
 
         TMap<FIntVector,FAp5SharedMeshVertex> SharedVertices;
         SharedVertices.Reserve(FMath::Max(1,FaceCount/2));
 
         uint64 VertexNormalCycles=0;
-        uint64 TriangleNormalCycles=0;
-        int32 UniqueVertexCount=0;
-        int32 ReusedVertexCount=0;
+        uint64 TriangleCycles=0;
         for (const Ap5Volume::Triangle& Face : Surface)
         {
             int32 Vertices[3];
-            int32 Normals[3];
 
             const uint64 VertexNormalStartedCycles=FPlatformTime::Cycles64();
             for (int32 K = 0; K < 3; ++K)
@@ -167,62 +163,42 @@ void AAp5Monster::RebuildMesh(int32 Index)
                 if (const FAp5SharedMeshVertex* Existing=SharedVertices.Find(Key))
                 {
                     Vertices[K]=Existing->Vertex;
-                    Normals[K]=Existing->Normal;
-                    ++ReusedVertexCount;
                     continue;
                 }
 
                 const Ap5Volume::Point& N = Face.Normals[K];
                 FAp5SharedMeshVertex Added;
                 Added.Vertex=Mesh.AppendVertex(FVector3d(P.X,P.Y,P.Z));
-                Added.Normal=Mesh.Attributes()->PrimaryNormals()->AppendElement(
+                Mesh.SetVertexNormal(Added.Vertex,
                     FVector3f(static_cast<float>(N.X),static_cast<float>(N.Y),static_cast<float>(N.Z)));
                 SharedVertices.Add(Key,Added);
                 Vertices[K]=Added.Vertex;
-                Normals[K]=Added.Normal;
-                ++UniqueVertexCount;
             }
             VertexNormalCycles+=FPlatformTime::Cycles64()-VertexNormalStartedCycles;
 
-            const uint64 TriangleNormalStartedCycles=FPlatformTime::Cycles64();
+            const uint64 TriangleStartedCycles=FPlatformTime::Cycles64();
             const int32 Triangle=Mesh.AppendTriangle(Vertices[0],Vertices[1],Vertices[2]);
             check(Triangle>=0);
-            Mesh.Attributes()->PrimaryNormals()->SetTriangle(Triangle,
-                UE::Geometry::FIndex3i(Normals[0],Normals[1],Normals[2]));
-            TriangleNormalCycles+=FPlatformTime::Cycles64()-TriangleNormalStartedCycles;
+            TriangleCycles+=FPlatformTime::Cycles64()-TriangleStartedCycles;
         }
 
         const uint64 DynamicMeshTotalCycles=FPlatformTime::Cycles64()-DynamicMeshStartedCycles;
-        const uint64 MeasuredCycles=AttributesCycles+VertexNormalCycles+TriangleNormalCycles;
+        const uint64 MeasuredCycles=VertexNormalInitCycles+VertexNormalCycles+TriangleCycles;
         const uint64 OtherCycles=DynamicMeshTotalCycles>MeasuredCycles
             ? DynamicMeshTotalCycles-MeasuredCycles : 0;
 
-        const double AttributesMilliseconds=FPlatformTime::ToMilliseconds64(AttributesCycles);
-        const double VertexNormalMilliseconds=FPlatformTime::ToMilliseconds64(VertexNormalCycles);
-        const double TriangleNormalMilliseconds=FPlatformTime::ToMilliseconds64(TriangleNormalCycles);
-        const double OtherMilliseconds=FPlatformTime::ToMilliseconds64(OtherCycles);
-        const double TotalMilliseconds=FPlatformTime::ToMilliseconds64(DynamicMeshTotalCycles);
-
         FAp5FrameProfiler::Get().AddMilliseconds(
-            EAp5ProfileProcess::DynamicMeshAttributes,AttributesMilliseconds);
+            EAp5ProfileProcess::DynamicMeshVertexNormalInit,
+            FPlatformTime::ToMilliseconds64(VertexNormalInitCycles));
         FAp5FrameProfiler::Get().AddMilliseconds(
-            EAp5ProfileProcess::DynamicMeshVertexNormalAppend,VertexNormalMilliseconds);
+            EAp5ProfileProcess::DynamicMeshVertexNormalAppend,
+            FPlatformTime::ToMilliseconds64(VertexNormalCycles));
         FAp5FrameProfiler::Get().AddMilliseconds(
-            EAp5ProfileProcess::DynamicMeshTriangleNormalBind,TriangleNormalMilliseconds);
+            EAp5ProfileProcess::DynamicMeshTriangleAppend,
+            FPlatformTime::ToMilliseconds64(TriangleCycles));
         FAp5FrameProfiler::Get().AddMilliseconds(
-            EAp5ProfileProcess::DynamicMeshOther,OtherMilliseconds);
-
-        // 小破片の大量ログはゲームスレッド側の未計測時間を増やすので、
-        // 最適化判断に必要な大きなメッシュだけを残す。
-        if (FaceCount>=1000)
-        {
-            FAp5ProfileScope Profile(EAp5ProfileProcess::ProfilerIO);
-            UE_LOG(LogTemp,Display,
-                TEXT("AP5_DYNAMIC_MESH: piece=%d fixed=%d faces=%d source_vertices=%d unique_vertices=%d reused_vertices=%d triangles=%d total_ms=%.3f attributes_ms=%.3f vertex_normal_ms=%.3f triangle_normal_ms=%.3f other_ms=%.3f"),
-                Index,State.Fixed ? 1 : 0,FaceCount,FaceCount*3,UniqueVertexCount,ReusedVertexCount,FaceCount,
-                TotalMilliseconds,AttributesMilliseconds,VertexNormalMilliseconds,
-                TriangleNormalMilliseconds,OtherMilliseconds);
-        }
+            EAp5ProfileProcess::DynamicMeshOther,
+            FPlatformTime::ToMilliseconds64(OtherCycles));
     }
 
     {
