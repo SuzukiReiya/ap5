@@ -288,7 +288,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Scripts\BuildAndRun.ps
 
 ### 連射時の低FPSフレーム集計
 
-連射時のヒッチ調査では、イベント単位の詳細ログを大量に残さず、**UEのエンジンフレーム境界ごとに処理時間だけをメモリ上で集計**します。フレーム時間は `FCoreDelegates::OnBeginFrame` から `OnEndFrame` までを実測し、フレーム間の待機・VSync/フレームペーシング等は `その他（未計測）` へ混ぜないようにします。
+連射時のヒッチ調査では、イベント単位の詳細ログを大量に残さず、**UEのエンジンフレーム境界ごとに処理時間だけをメモリ上で集計**します。フレーム時間は `FCoreDelegates::OnBeginFrame` から `OnEndFrame` までを実測します。起動直後はDynamicMesh Component生成・SceneProxy登録・RenderThread追従が集中し、通常プレイの連射性能と性質が異なるため、最初の120フレームはウォームアップとして集計対象外にします。
 
 - 50 FPS未満、つまり1フレームが20 msを超えたフレームだけを集計対象にする。
 - 各対象フレームで、処理カテゴリごとの合計時間を求める。同じ処理が1フレーム内で複数回呼ばれた場合は合算する。その処理が走らなかった低FPSフレームは0 msとして平均・最小へ含める。
@@ -298,7 +298,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Scripts\BuildAndRun.ps
 - 集計ファイルは毎フレーム追記せず、30フレームごとを上限に `Saved/Logs/Ap5SlowFrameProfile.csv` へ**上書き**する。新しい低FPSフレームが無ければ書き込まない。
 - プロファイルファイル自身の書き込み時間も `プロファイラI/O` として計測する。
 
-現在の排他的カテゴリは、弾生成、弾補助判定、物理状態同期、体積編集・連結判定、表面生成、DynamicMesh頂点法線初期化、DynamicMesh頂点追加・法線設定、DynamicMesh三角形追加、DynamicMeshその他、Mesh反映、衝突箱生成、衝突更新、物理衝突状態設定、物理Simulation切替、物理速度復元、コンポーネント生成、プロファイラI/O、FPS制限待機、FPS制限待機超過、その他（未計測）です。加えて、`参考_GameThread CPU`、`参考_GameThread Wait`、`参考_RenderThread CPU`、`参考_RenderThread Wait`、`参考_RHIThread CPU`、`参考_GPU` を記録します。参考値は並列実行されるため排他的カテゴリへ加算せず、`その他（未計測）` の差し引きにも使いません。隣接三角形の共有頂点IDを体積場のMarching Tetrahedra生成時に確定し、そのIndexed SurfaceをそのままDynamicMeshへ渡します。UE側でのTMap頂点検索を廃止し、法線はper-vertex normalとして保持します。
+現在の排他的カテゴリは、弾生成、弾補助判定、物理状態同期、体積編集・連結判定、表面生成、DynamicMesh頂点法線初期化、DynamicMesh頂点追加・法線設定、DynamicMesh三角形追加、描画チャンク分類・署名、Mesh反映、衝突箱生成、衝突更新、物理衝突状態設定、物理Simulation切替、物理速度復元、コンポーネント生成、プロファイラI/O、FPS制限待機、FPS制限待機超過、その他（未計測）です。加えて、`参考_GameThread CPU`、`参考_GameThread Wait`、`参考_RenderThread CPU`、`参考_RenderThread Wait`、`参考_RHIThread CPU`、`参考_GPU` を記録します。参考値は並列実行されるため排他的カテゴリへ加算せず、`その他（未計測）` の差し引きにも使いません。隣接三角形の共有頂点IDを体積場のMarching Tetrahedra生成時に確定し、そのIndexed SurfaceをそのままDynamicMeshへ渡します。UE側でのTMap頂点検索を廃止し、法線はper-vertex normalとして保持します。
 
 初回計測では、低FPSフレームの平均として「物理ボディ設定 約26 ms」「表面生成 約23 ms」「Dynamic Mesh構築 約16 ms」が突出し、弾生成・補助判定・体積編集は小さいことを確認しました。最適化後は弾補助判定が約0.001 ms、物理設定系が平均0.3 ms未満まで低下しました。Indexed Surfaceを直接DynamicMeshへ渡す方式では、頂点追加・法線設定が約0.29 ms、三角形追加が約2.29 ms、表面生成が約5.65 msまで低下しました。一方で `その他（未計測）` が大きく残りました。AP5は `t.MaxFPS=60` ですが、50 FPS未満の重いフレームでは既に16.7 msの予算を超えているため、FPS制限Sleepが発生せず `FPS制限待機=0` になることがあります。実測でも重いフレームでは待機0 msでした。直接インデックス表への変更後、表面生成は約1.2 ms、DynamicMesh三角形追加は約0.7 msまで低下しました。一方で `その他（未計測）` が平均約26 ms残ったため、UEが公開しているGame Thread、Render Thread、RHI Thread、GPUのフレーム時間を同じ低FPS統計へ参考値として追加しました。実測ではRender Thread CPUが低FPS時に突出し、GPUは約15 ms、RHI Threadは約1 ms未満だったため、全身DynamicMeshを毎回 `SetMesh` してRenderProxyを全面更新する構造が次の主因と判断しました。対策として、論理・物理上は1つのPieceのまま、描画だけを80 cm単位のDynamicMeshチャンクへ分割し、形状署名が変わったチャンクだけ `SetMesh` する方式へ変更しました。物理ComponentはSimple Collision専用とし、描画チャンクはその子として追従します。
 
