@@ -33,6 +33,17 @@ struct Piece
     Point ToWorld(const Point& Local) const { return ToWorldVector(Local)+Translation+Point(0,0,Motion.OffsetZ); }
     Point VelocityAt(const Point& World) const { return OriginVelocity+AngularVelocity.Cross(World-ToWorld(Point())); }
 
+    IndexedSurface RebuildIndexedSurface()
+    {
+        IndexedSurface Mesh=Volume.BuildIndexedSurface();
+        double MinimumZ=1e9;
+        for (const Point& P : Mesh.Vertices) MinimumZ=std::min(MinimumZ,P.Z);
+        Motion.MinimumZ=Mesh.Vertices.empty() ? 0 : MinimumZ;
+        // 着地した破片を削る・分けると、支えていた面がなくなる場合がある。
+        if (!Fixed) Motion.Landed=false;
+        return Mesh;
+    }
+
     std::vector<Triangle> RebuildSurface()
     {
         std::vector<Triangle> Mesh=Volume.Surface();
@@ -40,7 +51,6 @@ struct Piece
         for (const Triangle& Face : Mesh)
             for (const Point& P : Face.Vertices) MinimumZ=std::min(MinimumZ,P.Z);
         Motion.MinimumZ=Mesh.empty() ? 0 : MinimumZ;
-        // 着地した破片を削る・分けると、支えていた面がなくなる場合がある。
         if (!Fixed) Motion.Landed=false;
         return Mesh;
     }
