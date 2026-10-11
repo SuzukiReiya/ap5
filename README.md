@@ -300,7 +300,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Scripts\BuildAndRun.ps
 
 現在のカテゴリは、弾生成、弾補助判定、物理状態同期、体積編集・連結判定、表面生成、DynamicMesh頂点法線初期化、DynamicMesh頂点追加・法線設定、DynamicMesh三角形追加、DynamicMeshその他、Mesh反映、衝突箱生成、衝突更新、物理衝突状態設定、物理Simulation切替、物理速度復元、コンポーネント生成、プロファイラI/O、FPS制限待機、FPS制限待機超過、その他（未計測）です。隣接三角形の共有頂点IDを体積場のMarching Tetrahedra生成時に確定し、そのIndexed SurfaceをそのままDynamicMeshへ渡します。UE側でのTMap頂点検索を廃止し、法線はper-vertex normalとして保持します。
 
-初回計測では、低FPSフレームの平均として「物理ボディ設定 約26 ms」「表面生成 約23 ms」「Dynamic Mesh構築 約16 ms」が突出し、弾生成・補助判定・体積編集は小さいことを確認しました。最適化後は弾補助判定が約0.001 ms、物理設定系が平均0.3 ms未満まで低下しました。Indexed Surfaceを直接DynamicMeshへ渡す方式では、頂点追加・法線設定が約0.29 ms、三角形追加が約2.29 ms、表面生成が約5.65 msまで低下しました。一方で `その他（未計測）` が大きく残りました。確認するとAP5は `t.MaxFPS=60` で、UEの最大FPS制御によるSleepもOnBeginFrame→OnEndFrameに含まれるため、`FApp::GetIdleTime()` と `GetIdleTimeOvershoot()` を用いて意図的な待機と待機超過を別カテゴリへ分離しています。これにより、次回以降の `その他（未計測）` は実際の未分類CPU処理へ近づきます。
+初回計測では、低FPSフレームの平均として「物理ボディ設定 約26 ms」「表面生成 約23 ms」「Dynamic Mesh構築 約16 ms」が突出し、弾生成・補助判定・体積編集は小さいことを確認しました。最適化後は弾補助判定が約0.001 ms、物理設定系が平均0.3 ms未満まで低下しました。Indexed Surfaceを直接DynamicMeshへ渡す方式では、頂点追加・法線設定が約0.29 ms、三角形追加が約2.29 ms、表面生成が約5.65 msまで低下しました。一方で `その他（未計測）` が大きく残りました。AP5は `t.MaxFPS=60` ですが、50 FPS未満の重いフレームでは既に16.7 msの予算を超えているため、FPS制限Sleepが発生せず `FPS制限待機=0` になることがあります。実測でも重いフレームでは待機0 msだったため、次の優先対象は既知のCPU処理へ戻します。特に表面生成が約7.9 msと最大なので、Indexed Surface生成時の `unordered_map` による辺検索を廃止し、格子点×7方向の直接インデックス表へ変更しました。また全面内側/外側セルでは頂点座標を生成しないようにし、表面セルだけで座標演算を行います。
 
 CSVは各カテゴリにつき次の3値だけを保持します。
 
