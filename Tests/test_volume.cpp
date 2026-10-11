@@ -710,6 +710,15 @@ int main()
     assert(Scene.ResetDrivenParts(WalkBody,WalkParts,{Point(0,0,120)}));
     assert(Scene.Items.size()==5);
     assert(Scene.Items[0].Fixed && !Scene.Items[0].Driven && Scene.Items[0].DriveId==-1);
+
+    // 歩行上半身の支持は腹部中央ではなく左右股関節側。
+    // 腹部に貫通穴を開けても股関節材料が残る限り固定解除しない。
+    Scene.ResetDrivenParts(WalkBody,WalkParts,{Point(0,-30,120),Point(0,30,120)});
+    assert(Scene.Items.size()==5 && Scene.Items[0].Fixed);
+    const int RootBefore=Scene.Items[0].Volume.MaterialCount();
+    assert(Scene.Brush(Point(-200,0,120),Point(1,0,0),12,false,Changed)>0);
+    assert(Scene.Items[0].Volume.MaterialCount()<RootBefore);
+    assert(Scene.Items[0].Fixed);
     int DriveCount[5]={0,0,0,0,0};
     for (size_t I=1;I<Scene.Items.size();++I)
     {
