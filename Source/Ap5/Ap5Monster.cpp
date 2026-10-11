@@ -18,6 +18,30 @@ namespace
 Ap5Volume::Point VolumePoint(const FVector& P) { return Ap5Volume::Point(P.X,P.Y,P.Z); }
 FVector EnginePoint(const Ap5Volume::Point& P) { return FVector(P.X,P.Y,P.Z); }
 
+constexpr double RenderChunkSizeCm = 80.0;
+constexpr uint64 FnvOffset = 1469598103934665603ull;
+constexpr uint64 FnvPrime = 1099511628211ull;
+
+uint64 HashInt64(uint64 Hash, int64 Value)
+{
+    uint64 Bits=static_cast<uint64>(Value);
+    for (int32 I=0;I<8;++I)
+    {
+        Hash^=(Bits & 0xffull);
+        Hash*=FnvPrime;
+        Bits>>=8;
+    }
+    return Hash;
+}
+
+uint64 HashPoint(uint64 Hash,const Ap5Volume::Point& P,double Scale)
+{
+    Hash=HashInt64(Hash,static_cast<int64>(std::llround(P.X*Scale)));
+    Hash=HashInt64(Hash,static_cast<int64>(std::llround(P.Y*Scale)));
+    Hash=HashInt64(Hash,static_cast<int64>(std::llround(P.Z*Scale)));
+    return Hash;
+}
+
 }
 
 AAp5Monster::AAp5Monster()
@@ -85,6 +109,9 @@ UDynamicMeshComponent* AAp5Monster::CreatePiece()
     Piece->SetMobility(EComponentMobility::Movable);
     Piece->SetCollisionEnabled(ECollisionEnabled::NoCollision);
     Piece->SetCollisionResponseToAllChannels(ECR_Block);
+    // 物理用Componentは描画しない。描画は局所更新可能な子チャンクへ分離する。
+    Piece->SetVisibility(false, false);
+    Piece->SetCanEverAffectNavigation(false);
     // 連射時に単純衝突の再Cookでゲームスレッドを止めない。
     Piece->bUseAsyncCooking = true;
     Piece->SetComplexAsSimpleCollisionEnabled(false, false);
@@ -92,11 +119,27 @@ UDynamicMeshComponent* AAp5Monster::CreatePiece()
     Piece->SetDeferredCollisionUpdatesEnabled(true, false);
     Piece->SetLinearDamping(0.15f);
     Piece->SetAngularDamping(0.5f);
-    Piece->SetMaterial(0, GolemMaterial != nullptr
-        ? GolemMaterial.Get() : UMaterial::GetDefaultMaterial(MD_Surface));
     Piece->RegisterComponent();
     Piece->SetUseCCD(true, NAME_None);
     return Piece;
+}
+
+UDynamicMeshComponent* AAp5Monster::CreateVisualChunk(UDynamicMeshComponent* Parent)
+{
+    FAp5ProfileScope Profile(EAp5ProfileProcess::ComponentCreate);
+    UDynamicMeshComponent* Chunk=NewObject<UDynamicMeshComponent>(this);
+    AddInstanceComponent(Chunk);
+    Chunk->SetupAttachment(Parent);
+    Chunk->SetMobility(EComponentMobility::Movable);
+    Chunk->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    Chunk->SetCanEverAffectNavigation(false);
+    // BasicShapeMaterialは法線マップを使わないため、接線生成を省く。
+    Chunk->SetTangentsType(EDynamicMeshComponentTangentsMode::NoTangents);
+    Chunk->SetMaterial(0,GolemMaterial != nullptr
+        ? GolemMaterial.Get() : UMaterial::GetDefaultMaterial(MD_Surface));
+    Chunk->RegisterComponent();
+    Chunk->SetRelativeTransform(FTransform::Identity);
+    return Chunk;
 }
 
 void AAp5Monster::RebuildMesh(int32 Index)
@@ -119,67 +162,8 @@ void AAp5Monster::RebuildMesh(int32 Index)
         Surface = State.RebuildIndexedSurface();
     }
 
-    UE::Geometry::FDynamicMesh3 Mesh;
-    {
-        // 体積場側で既に共有頂点IDを確定しているため、UE側では頂点検索を行わない。
-        const uint64 DynamicMeshStartedCycles=FPlatformTime::Cycles64();
+    UpdateVisualChunks(Index,Surface);
 
-        const uint64 VertexNormalInitStartedCycles=FPlatformTime::Cycles64();
-        Mesh.EnableVertexNormals(FVector3f(0,0,1));
-        const uint64 VertexNormalInitCycles=
-            FPlatformTime::Cycles64()-VertexNormalInitStartedCycles;
-
-        uint64 VertexNormalCycles=0;
-        uint64 TriangleCycles=0;
-
-        const uint64 VertexNormalStartedCycles=FPlatformTime::Cycles64();
-        TArray<int32> VertexIds;
-        VertexIds.SetNumUninitialized(static_cast<int32>(Surface.Vertices.size()));
-        for (int32 I=0;I<VertexIds.Num();++I)
-        {
-            const Ap5Volume::Point& P=Surface.Vertices[static_cast<size_t>(I)];
-            const Ap5Volume::Point& N=Surface.Normals[static_cast<size_t>(I)];
-            const int32 Vertex=Mesh.AppendVertex(FVector3d(P.X,P.Y,P.Z));
-            Mesh.SetVertexNormal(Vertex,
-                FVector3f(static_cast<float>(N.X),static_cast<float>(N.Y),static_cast<float>(N.Z)));
-            VertexIds[I]=Vertex;
-        }
-        VertexNormalCycles+=FPlatformTime::Cycles64()-VertexNormalStartedCycles;
-
-        const uint64 TriangleStartedCycles=FPlatformTime::Cycles64();
-        for (const Ap5Volume::IndexedTriangle& Face : Surface.Triangles)
-        {
-            const int32 Triangle=Mesh.AppendTriangle(
-                VertexIds[Face.Vertices[0]],
-                VertexIds[Face.Vertices[1]],
-                VertexIds[Face.Vertices[2]]);
-            check(Triangle>=0);
-        }
-        TriangleCycles+=FPlatformTime::Cycles64()-TriangleStartedCycles;
-
-        const uint64 DynamicMeshTotalCycles=FPlatformTime::Cycles64()-DynamicMeshStartedCycles;
-        const uint64 MeasuredCycles=VertexNormalInitCycles+VertexNormalCycles+TriangleCycles;
-        const uint64 OtherCycles=DynamicMeshTotalCycles>MeasuredCycles
-            ? DynamicMeshTotalCycles-MeasuredCycles : 0;
-
-        FAp5FrameProfiler::Get().AddMilliseconds(
-            EAp5ProfileProcess::DynamicMeshVertexNormalInit,
-            FPlatformTime::ToMilliseconds64(VertexNormalInitCycles));
-        FAp5FrameProfiler::Get().AddMilliseconds(
-            EAp5ProfileProcess::DynamicMeshVertexNormalAppend,
-            FPlatformTime::ToMilliseconds64(VertexNormalCycles));
-        FAp5FrameProfiler::Get().AddMilliseconds(
-            EAp5ProfileProcess::DynamicMeshTriangleAppend,
-            FPlatformTime::ToMilliseconds64(TriangleCycles));
-        FAp5FrameProfiler::Get().AddMilliseconds(
-            EAp5ProfileProcess::DynamicMeshOther,
-            FPlatformTime::ToMilliseconds64(OtherCycles));
-    }
-
-    {
-        FAp5ProfileScope Profile(EAp5ProfileProcess::SetMesh);
-        Component->SetMesh(MoveTemp(Mesh));
-    }
 
     const FQuat Rotation = FRotationMatrix::MakeFromXY(
         EnginePoint(State.AxisX), EnginePoint(State.AxisY)).ToQuat();
@@ -248,9 +232,150 @@ void AAp5Monster::RebuildMesh(int32 Index)
     }
 }
 
+void AAp5Monster::DestroyVisualChunks(int32 Index)
+{
+    if (!PieceVisualChunks.IsValidIndex(Index)) return;
+    for (TPair<FIntVector,FVisualChunkState>& Pair : PieceVisualChunks[Index])
+        if (IsValid(Pair.Value.Component)) Pair.Value.Component->DestroyComponent();
+    PieceVisualChunks[Index].Empty();
+}
+
+void AAp5Monster::UpdateVisualChunks(int32 Index,const Ap5Volume::IndexedSurface& Surface)
+{
+    if (!PieceMeshes.IsValidIndex(Index)) return;
+    while (PieceVisualChunks.Num()<=Index) PieceVisualChunks.AddDefaulted();
+
+    struct FChunkBuild
+    {
+        uint64 Signature=FnvOffset;
+        TArray<int32> Triangles;
+    };
+
+    TMap<FIntVector,FChunkBuild> Builds;
+    {
+        const uint64 Started=FPlatformTime::Cycles64();
+        for (int32 TriangleIndex=0;
+            TriangleIndex<static_cast<int32>(Surface.Triangles.size());++TriangleIndex)
+        {
+            const Ap5Volume::IndexedTriangle& Face=
+                Surface.Triangles[static_cast<size_t>(TriangleIndex)];
+            const Ap5Volume::Point& A=Surface.Vertices[Face.Vertices[0]];
+            const Ap5Volume::Point& B=Surface.Vertices[Face.Vertices[1]];
+            const Ap5Volume::Point& C=Surface.Vertices[Face.Vertices[2]];
+            const Ap5Volume::Point Center=(A+B+C)*(1.0/3.0);
+            const FIntVector Key(
+                FMath::FloorToInt(Center.X/RenderChunkSizeCm),
+                FMath::FloorToInt(Center.Y/RenderChunkSizeCm),
+                FMath::FloorToInt(Center.Z/RenderChunkSizeCm));
+            FChunkBuild& Build=Builds.FindOrAdd(Key);
+            Build.Triangles.Add(TriangleIndex);
+            // グローバル頂点IDは他チャンクの編集でずれるため、実座標と法線を署名にする。
+            for (int32 K=0;K<3;++K)
+            {
+                const int32 Vertex=Face.Vertices[K];
+                Build.Signature=HashPoint(Build.Signature,Surface.Vertices[Vertex],1000.0);
+                Build.Signature=HashPoint(Build.Signature,Surface.Normals[Vertex],1000000.0);
+            }
+        }
+        FAp5FrameProfiler::Get().AddMilliseconds(
+            EAp5ProfileProcess::DynamicMeshOther,
+            FPlatformTime::ToMilliseconds64(FPlatformTime::Cycles64()-Started));
+    }
+
+    TMap<FIntVector,FVisualChunkState>& Existing=PieceVisualChunks[Index];
+
+    // 消えたチャンクだけ破棄する。
+    TArray<FIntVector> Removed;
+    for (const TPair<FIntVector,FVisualChunkState>& Pair : Existing)
+        if (!Builds.Contains(Pair.Key)) Removed.Add(Pair.Key);
+    for (const FIntVector& Key : Removed)
+    {
+        if (FVisualChunkState* State=Existing.Find(Key))
+            if (IsValid(State->Component)) State->Component->DestroyComponent();
+        Existing.Remove(Key);
+    }
+
+    for (TPair<FIntVector,FChunkBuild>& Pair : Builds)
+    {
+        FVisualChunkState* Current=Existing.Find(Pair.Key);
+        if (Current!=nullptr && Current->Signature==Pair.Value.Signature
+            && IsValid(Current->Component))
+            continue;
+
+        UDynamicMeshComponent* Chunk=
+            Current!=nullptr && IsValid(Current->Component)
+                ? Current->Component : CreateVisualChunk(PieceMeshes[Index]);
+
+        UE::Geometry::FDynamicMesh3 Mesh;
+        {
+            const uint64 InitStarted=FPlatformTime::Cycles64();
+            Mesh.EnableVertexNormals(FVector3f(0,0,1));
+            FAp5FrameProfiler::Get().AddMilliseconds(
+                EAp5ProfileProcess::DynamicMeshVertexNormalInit,
+                FPlatformTime::ToMilliseconds64(FPlatformTime::Cycles64()-InitStarted));
+        }
+
+        TMap<int32,int32> VertexRemap;
+        VertexRemap.Reserve(Pair.Value.Triangles.Num()*2);
+
+        for (int32 SurfaceTriangleIndex : Pair.Value.Triangles)
+        {
+            const Ap5Volume::IndexedTriangle& Face=
+                Surface.Triangles[static_cast<size_t>(SurfaceTriangleIndex)];
+            int32 Vertices[3];
+            {
+                const uint64 VertexStarted=FPlatformTime::Cycles64();
+                for (int32 K=0;K<3;++K)
+                {
+                    const int32 SourceVertex=Face.Vertices[K];
+                    if (const int32* ExistingVertex=VertexRemap.Find(SourceVertex))
+                    {
+                        Vertices[K]=*ExistingVertex;
+                        continue;
+                    }
+                    const Ap5Volume::Point& P=Surface.Vertices[SourceVertex];
+                    const Ap5Volume::Point& N=Surface.Normals[SourceVertex];
+                    const int32 Vertex=Mesh.AppendVertex(FVector3d(P.X,P.Y,P.Z));
+                    Mesh.SetVertexNormal(Vertex,FVector3f(
+                        static_cast<float>(N.X),
+                        static_cast<float>(N.Y),
+                        static_cast<float>(N.Z)));
+                    VertexRemap.Add(SourceVertex,Vertex);
+                    Vertices[K]=Vertex;
+                }
+                FAp5FrameProfiler::Get().AddMilliseconds(
+                    EAp5ProfileProcess::DynamicMeshVertexNormalAppend,
+                    FPlatformTime::ToMilliseconds64(FPlatformTime::Cycles64()-VertexStarted));
+            }
+
+            {
+                const uint64 TriangleStarted=FPlatformTime::Cycles64();
+                const int32 Added=Mesh.AppendTriangle(Vertices[0],Vertices[1],Vertices[2]);
+                check(Added>=0);
+                FAp5FrameProfiler::Get().AddMilliseconds(
+                    EAp5ProfileProcess::DynamicMeshTriangleAppend,
+                    FPlatformTime::ToMilliseconds64(FPlatformTime::Cycles64()-TriangleStarted));
+            }
+        }
+
+        {
+            FAp5ProfileScope Profile(EAp5ProfileProcess::SetMesh);
+            Chunk->SetMesh(MoveTemp(Mesh));
+        }
+
+        FVisualChunkState& Stored=Existing.FindOrAdd(Pair.Key);
+        Stored.Component=Chunk;
+        Stored.Signature=Pair.Value.Signature;
+    }
+}
+
 void AAp5Monster::RefreshPieces(const std::vector<int>& Changed)
 {
-    while (PieceMeshes.Num() < static_cast<int32>(Pieces.Items.size())) PieceMeshes.Add(CreatePiece());
+    while (PieceMeshes.Num() < static_cast<int32>(Pieces.Items.size()))
+    {
+        PieceMeshes.Add(CreatePiece());
+        PieceVisualChunks.AddDefaulted();
+    }
     for (int32 Index : Changed) RebuildMesh(Index);
     SetActorTickEnabled(true);
 }
@@ -426,24 +551,8 @@ bool AAp5Monster::ApplyProjectileSweep(const FVector& Start, const FVector& End,
 {
     if ((End-Start).IsNearlyZero()) return false;
 
-    bool bNearAnyPiece=false;
-    {
-        FAp5ProfileScope Profile(EAp5ProfileProcess::ProjectileSweep);
-        FBox SegmentBounds(ForceInit);
-        SegmentBounds+=Start;
-        SegmentBounds+=End;
-        SegmentBounds=SegmentBounds.ExpandBy(SweepRadius);
-        for (UDynamicMeshComponent* Component : PieceMeshes)
-        {
-            if (IsValid(Component) && SegmentBounds.Intersect(Component->Bounds.GetBox()))
-            {
-                bNearAnyPiece=true;
-                break;
-            }
-        }
-    }
-    if (!bNearAnyPiece) return false;
-
+    // 物理Componentは描画メッシュを持たないためBoundsは使わず、
+    // PickSwept内の体積AABB判定を唯一の粗判定にする。
     SyncPhysicsState();
 
     int32 Target=INDEX_NONE;
@@ -566,8 +675,11 @@ bool AAp5Monster::GetGrabLocation(FVector& Location) const
 
 bool AAp5Monster::GetJoinSelectionLocation(FVector& Location) const
 {
-    if (!PieceMeshes.IsValidIndex(SelectedJoinPiece)) return false;
-    Location = PieceMeshes[SelectedJoinPiece]->Bounds.Origin;
+    if (!PieceMeshes.IsValidIndex(SelectedJoinPiece)
+        || SelectedJoinPiece>=static_cast<int32>(Pieces.Items.size())) return false;
+    const Ap5Volume::Piece& State=Pieces.Items[SelectedJoinPiece];
+    Location=GetActorTransform().TransformPosition(
+        EnginePoint(State.ToWorld(State.Volume.MaterialCentroid())));
     return true;
 }
 
@@ -606,6 +718,8 @@ FString AAp5Monster::ApplyJoin(const FVector& Start, const FVector& Direction)
         return TEXT("接合対象が無効です。8で選択を解除してください。");
     }
     // データの番号とコンポーネントの番号をそろえ、吸収した破片の物理ボディを除去する。
+    DestroyVisualChunks(Source);
+    PieceVisualChunks.RemoveAt(Source);
     PieceMeshes[Source]->DestroyComponent();
     PieceMeshes.RemoveAt(Source);
     ClearJoinSelection();
@@ -695,6 +809,8 @@ void AAp5Monster::ResetShape()
 {
     EndGrab();
     ClearJoinSelection();
+    for (int32 I=0;I<PieceVisualChunks.Num();++I) DestroyVisualChunks(I);
+    PieceVisualChunks.Empty();
     for (UDynamicMeshComponent* Mesh : PieceMeshes) Mesh->DestroyComponent();
     PieceMeshes.Empty();
     bool ArticulatedReady=true;
@@ -718,6 +834,7 @@ void AAp5Monster::ResetShape()
     for (int32 I=0;I<static_cast<int32>(Pieces.Items.size());++I)
     {
         PieceMeshes.Add(CreatePiece());
+        PieceVisualChunks.AddDefaulted();
         RebuildMesh(I);
     }
     ArmMotionTime=0.0f;
