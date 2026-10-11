@@ -63,7 +63,7 @@ void AAp5Monster::BeginPlay()
     UE_LOG(LogTemp, Display, TEXT("AP5_MONSTER_READY: shapes=%d volume_spacing_cm=5"), static_cast<int32>(Shapes.size()));
 }
 
-void AAp5Monster::AddPart(FName /*Name*/, const FVector& Center,
+void AAp5Monster::AddPart(FName Name, const FVector& Center,
     const FVector& Radii, const FRotator& Rotation)
 {
     Ap5Volume::Ellipsoid Shape;
@@ -76,6 +76,13 @@ void AAp5Monster::AddPart(FName /*Name*/, const FVector& Center,
     Shape.AxisY = Ap5Volume::Point(Y.X, Y.Y, Y.Z);
     Shape.AxisZ = Ap5Volume::Point(Z.X, Z.Y, Z.Z);
     Shapes.push_back(Shape);
+
+    const FString PartName=Name.ToString();
+    const bool bLegPart=PartName.Contains(TEXT("Thigh"))
+        || PartName.Contains(TEXT("Shin")) || PartName.Contains(TEXT("Foot"));
+    if (bLegPart && PartName.StartsWith(TEXT("Left"))) LeftLegShapes.push_back(Shape);
+    else if (bLegPart && PartName.StartsWith(TEXT("Right"))) RightLegShapes.push_back(Shape);
+    else BodyShapes.push_back(Shape);
 }
 
 UDynamicMeshComponent* AAp5Monster::CreatePiece()
@@ -745,16 +752,67 @@ void AAp5Monster::Tick(float DeltaSeconds)
 {
     Super::Tick(DeltaSeconds);
     UpdateArmMotion(DeltaSeconds);
+    UpdateLegMotion(DeltaSeconds);
     SyncPhysicsState();
 }
 
 bool AAp5Monster::ToggleArmMotionTest()
 {
     bArmMotionTest=!bArmMotionTest;
+    if (bArmMotionTest) bLegMotionTest=false;
     ArmMotionTime=0.0f;
     ResetShape();
     UE_LOG(LogTemp, Display, TEXT("AP5_ARM_MOTION: enabled=%d"), bArmMotionTest ? 1 : 0);
     return bArmMotionTest;
+}
+
+void AAp5Monster::UpdateLegMotion(float DeltaSeconds)
+{
+    if (!bLegMotionTest) return;
+    LegMotionTime+=FMath::Max(0.0f,DeltaSeconds);
+    const float Frequency=2.0f*PI/1.8f;
+    const float Phase=LegMotionTime*Frequency;
+    const float BaseAngle=FMath::DegreesToRadians(22.0f*FMath::Sin(Phase));
+    const float BaseAngularSpeed=FMath::DegreesToRadians(22.0f)*Frequency*FMath::Cos(Phase);
+
+    for (int32 I=0;I<static_cast<int32>(Pieces.Items.size());++I)
+    {
+        Ap5Volume::Piece& State=Pieces.Items[I];
+        if (!State.Driven || !State.Fixed || !PieceMeshes.IsValidIndex(I)
+            || (State.DriveId!=1 && State.DriveId!=2))
+            continue;
+
+        const float SideSign=State.DriveId==1 ? 1.0f : -1.0f;
+        const float AngleRadians=BaseAngle*SideSign;
+        const float AngularSpeed=BaseAngularSpeed*SideSign;
+        const FQuat Rotation(FVector::RightVector,AngleRadians);
+        const FVector Pivot=EnginePoint(State.JointPivot);
+        const FVector RotatedPivot=Rotation.RotateVector(Pivot);
+        const FVector Translation=Pivot-RotatedPivot;
+        const FVector Omega=FVector::RightVector*AngularSpeed;
+        const FVector OriginVelocity=-FVector::CrossProduct(Omega,RotatedPivot);
+
+        State.AxisX=VolumePoint(Rotation.RotateVector(FVector::ForwardVector));
+        State.AxisY=VolumePoint(Rotation.RotateVector(FVector::RightVector));
+        State.AxisZ=VolumePoint(Rotation.RotateVector(FVector::UpVector));
+        State.Translation=VolumePoint(Translation);
+        State.OriginVelocity=VolumePoint(OriginVelocity);
+        State.AngularVelocity=VolumePoint(Omega);
+
+        const FTransform LocalTransform(Rotation,Translation);
+        PieceMeshes[I]->SetWorldTransform(
+            LocalTransform*GetActorTransform(),false,nullptr,ETeleportType::TeleportPhysics);
+    }
+}
+
+bool AAp5Monster::ToggleLegMotionTest()
+{
+    bLegMotionTest=!bLegMotionTest;
+    if (bLegMotionTest) bArmMotionTest=false;
+    LegMotionTime=0.0f;
+    ResetShape();
+    UE_LOG(LogTemp, Display, TEXT("AP5_LEG_MOTION: enabled=%d"),bLegMotionTest ? 1 : 0);
+    return bLegMotionTest;
 }
 
 void AAp5Monster::ResetShape()
@@ -773,6 +831,24 @@ void AAp5Monster::ResetShape()
             InitialVolume,Ap5Volume::Point(0,72,233),Ap5Volume::Point(0,1,0),
             Ap5Volume::Point(0,72,233),Ap5Volume::Point(0,82,233));
     }
+    else if (bLegMotionTest)
+    {
+        Ap5Volume::Field BodyVolume,LeftLegVolume,RightLegVolume;
+        BodyVolume.InitializeUnion(BodyShapes);
+        LeftLegVolume.InitializeUnion(LeftLegShapes);
+        RightLegVolume.InitializeUnion(RightLegShapes);
+        std::vector<Ap5Volume::DrivenPartSetup> DrivenParts(2);
+        DrivenParts[0].Volume=std::move(LeftLegVolume);
+        DrivenParts[0].JointPivot=Ap5Volume::Point(0,-34,118);
+        DrivenParts[0].JointAnchor=Ap5Volume::Point(0,-34,112);
+        DrivenParts[0].DriveId=1;
+        DrivenParts[1].Volume=std::move(RightLegVolume);
+        DrivenParts[1].JointPivot=Ap5Volume::Point(0,34,118);
+        DrivenParts[1].JointAnchor=Ap5Volume::Point(0,34,112);
+        DrivenParts[1].DriveId=2;
+        ArticulatedReady=Pieces.ResetDrivenParts(
+            BodyVolume,DrivenParts,{Ap5Volume::Point(0,0,170)});
+    }
     else
     {
         Pieces.Reset(InitialVolume);
@@ -780,8 +856,9 @@ void AAp5Monster::ResetShape()
     if (!ArticulatedReady)
     {
         bArmMotionTest=false;
+        bLegMotionTest=false;
         Pieces.Reset(InitialVolume);
-        UE_LOG(LogTemp, Error, TEXT("AP5_ARM_MOTION_SETUP_FAILED"));
+        UE_LOG(LogTemp, Error, TEXT("AP5_ARTICULATED_SETUP_FAILED"));
     }
     for (int32 I=0;I<static_cast<int32>(Pieces.Items.size());++I)
     {
@@ -790,8 +867,10 @@ void AAp5Monster::ResetShape()
         RebuildMesh(I);
     }
     ArmMotionTime=0.0f;
+    LegMotionTime=0.0f;
     UpdateArmMotion(0.0f);
-    SetActorTickEnabled(bArmMotionTest);
-    UE_LOG(LogTemp, Display, TEXT("AP5_VOLUME_RESET: articulated=%d pieces=%d"),
-        bArmMotionTest ? 1 : 0, static_cast<int32>(Pieces.Items.size()));
+    UpdateLegMotion(0.0f);
+    SetActorTickEnabled(bArmMotionTest || bLegMotionTest);
+    UE_LOG(LogTemp, Display, TEXT("AP5_VOLUME_RESET: arm=%d legs=%d pieces=%d"),
+        bArmMotionTest ? 1 : 0,bLegMotionTest ? 1 : 0,static_cast<int32>(Pieces.Items.size()));
 }
