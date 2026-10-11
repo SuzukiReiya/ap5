@@ -3,6 +3,8 @@
 // UEに依存しない体積演算。負値が材料、正値が空間を表す。
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
+#include <unordered_map>
 #include <vector>
 #include <utility>
 
@@ -46,6 +48,18 @@ struct Triangle
 {
     Point Vertices[3];
     Point Normals[3];
+};
+
+struct IndexedTriangle
+{
+    int Vertices[3];
+};
+
+struct IndexedSurface
+{
+    std::vector<Point> Vertices;
+    std::vector<Point> Normals;
+    std::vector<IndexedTriangle> Triangles;
 };
 
 struct CollisionBox
@@ -501,19 +515,24 @@ public:
         return true;
     }
 
-    std::vector<Triangle> Surface() const
+    IndexedSurface BuildIndexedSurface() const
     {
-        std::vector<Triangle> Result;
+        IndexedSurface Result;
+        std::unordered_map<std::uint64_t,int> EdgeVertices;
+        EdgeVertices.reserve(std::max<size_t>(64,Values.size()/4));
+
         // 隣接セルと面の対角線が一致する6四面体分割。
         const int Corners[8][3] = {{0,0,0},{1,0,0},{1,1,0},{0,1,0},{0,0,1},{1,0,1},{1,1,1},{0,1,1}};
         const int Tetrahedra[6][4] = {{0,1,2,6},{0,2,3,6},{0,3,7,6},{0,7,4,6},{0,4,5,6},{0,5,1,6}};
         for (int Z=0; Z<NZ-1; ++Z) for (int Y=0; Y<NY-1; ++Y) for (int X=0; X<NX-1; ++X)
         {
-            Point P[8]; double V[8]; int Negative = 0;
+            Point P[8]; double V[8]; int GridIndex[8]; int Negative = 0;
             for (int C=0; C<8; ++C)
             {
-                P[C] = Position(X+Corners[C][0],Y+Corners[C][1],Z+Corners[C][2]);
-                V[C] = Values[Index(X+Corners[C][0],Y+Corners[C][1],Z+Corners[C][2])];
+                const int GX=X+Corners[C][0], GY=Y+Corners[C][1], GZ=Z+Corners[C][2];
+                P[C] = Position(GX,GY,GZ);
+                GridIndex[C] = Index(GX,GY,GZ);
+                V[C] = Values[GridIndex[C]];
                 if (V[C] < 0) ++Negative;
             }
             if (Negative == 0 || Negative == 8) continue;
@@ -533,19 +552,36 @@ public:
                 {
                     const int A = NI==1 ? Inside[0] : Outside[0];
                     const int* Others = NI==1 ? Outside : Inside;
-                    Emit(Result, Intersect(P,V,A,Others[0]), Intersect(P,V,A,Others[1]),
-                        Intersect(P,V,A,Others[2]), Outward);
+                    EmitIndexed(Result,EdgeVertices,P,V,GridIndex,
+                        A,Others[0],A,Others[1],A,Others[2],Outward);
                 }
                 else
                 {
-                    const Point A = Intersect(P,V,Inside[0],Outside[0]);
-                    const Point B = Intersect(P,V,Inside[0],Outside[1]);
-                    const Point C = Intersect(P,V,Inside[1],Outside[1]);
-                    const Point D = Intersect(P,V,Inside[1],Outside[0]);
-                    Emit(Result,A,B,C,Outward);
-                    Emit(Result,A,C,D,Outward);
+                    EmitIndexed(Result,EdgeVertices,P,V,GridIndex,
+                        Inside[0],Outside[0],Inside[0],Outside[1],Inside[1],Outside[1],Outward);
+                    EmitIndexed(Result,EdgeVertices,P,V,GridIndex,
+                        Inside[0],Outside[0],Inside[1],Outside[1],Inside[1],Outside[0],Outward);
                 }
             }
+        }
+        return Result;
+    }
+
+    std::vector<Triangle> Surface() const
+    {
+        const IndexedSurface Indexed=BuildIndexedSurface();
+        std::vector<Triangle> Result;
+        Result.reserve(Indexed.Triangles.size());
+        for (const IndexedTriangle& IndexedFace : Indexed.Triangles)
+        {
+            Triangle Face;
+            for (int K=0;K<3;++K)
+            {
+                const int Vertex=IndexedFace.Vertices[K];
+                Face.Vertices[K]=Indexed.Vertices[Vertex];
+                Face.Normals[K]=Indexed.Normals[Vertex];
+            }
+            Result.push_back(Face);
         }
         return Result;
     }
@@ -567,6 +603,46 @@ private:
     {
         return P[A]+(P[B]-P[A])*(V[A]/(V[A]-V[B]));
     }
+    static std::uint64_t EdgeKey(int A,int B)
+    {
+        const std::uint32_t Low=static_cast<std::uint32_t>(std::min(A,B));
+        const std::uint32_t High=static_cast<std::uint32_t>(std::max(A,B));
+        return (static_cast<std::uint64_t>(Low)<<32)|High;
+    }
+
+    int SurfaceVertex(IndexedSurface& Result,std::unordered_map<std::uint64_t,int>& EdgeVertices,
+        const Point* P,const double* V,const int* GridIndex,int A,int B) const
+    {
+        const std::uint64_t Key=EdgeKey(GridIndex[A],GridIndex[B]);
+        const auto Existing=EdgeVertices.find(Key);
+        if (Existing!=EdgeVertices.end()) return Existing->second;
+
+        const Point PositionOnEdge=Intersect(P,V,A,B);
+        const int Vertex=static_cast<int>(Result.Vertices.size());
+        Result.Vertices.push_back(PositionOnEdge);
+        Result.Normals.push_back(Normal(PositionOnEdge));
+        EdgeVertices.emplace(Key,Vertex);
+        return Vertex;
+    }
+
+    void EmitIndexed(IndexedSurface& Result,std::unordered_map<std::uint64_t,int>& EdgeVertices,
+        const Point* P,const double* V,const int* GridIndex,
+        int A0,int B0,int A1,int B1,int A2,int B2,const Point& Outward) const
+    {
+        int Vertices[3]={
+            SurfaceVertex(Result,EdgeVertices,P,V,GridIndex,A0,B0),
+            SurfaceVertex(Result,EdgeVertices,P,V,GridIndex,A1,B1),
+            SurfaceVertex(Result,EdgeVertices,P,V,GridIndex,A2,B2)};
+        const Point& P0=Result.Vertices[Vertices[0]];
+        const Point& P1=Result.Vertices[Vertices[1]];
+        const Point& P2=Result.Vertices[Vertices[2]];
+        const Point Cross=(P1-P0).Cross(P2-P0);
+        if (Cross.Length()<1e-10) return;
+        if (Cross.Dot(Outward)>0) std::swap(Vertices[1],Vertices[2]);
+        IndexedTriangle Face={{Vertices[0],Vertices[1],Vertices[2]}};
+        Result.Triangles.push_back(Face);
+    }
+
     Point Normal(const Point& P) const
     {
         // 表面頂点ごとに6回の三線形Sampleを行うと、全面再生成時の支配コストになる。
@@ -581,15 +657,6 @@ private:
             Values[Index(X+1,Y,Z)]-Values[Index(X-1,Y,Z)],
             Values[Index(X,Y+1,Z)]-Values[Index(X,Y-1,Z)],
             Values[Index(X,Y,Z+1)]-Values[Index(X,Y,Z-1)]).Unit();
-    }
-    void Emit(std::vector<Triangle>& Result, Point A, Point B, Point C, const Point& Outward) const
-    {
-        const Point Cross = (B-A).Cross(C-A);
-        if (Cross.Length()<1e-10) return;
-        // UEの表面の頂点順に合わせる。法線は材料から空間へ向ける。
-        if (Cross.Dot(Outward)>0) std::swap(B,C);
-        Triangle Face = {{A,B,C},{Normal(A),Normal(B),Normal(C)}};
-        Result.push_back(Face);
     }
 };
 }
