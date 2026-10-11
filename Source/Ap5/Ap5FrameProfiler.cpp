@@ -167,7 +167,7 @@ void FAp5FrameProfiler::FinalizeCurrentFrame(double FrameMilliseconds)
 
 void FAp5FrameProfiler::WriteSummaryIfNeeded()
 {
-    if (!bSummaryDirty || SlowFrameCount == 0) return;
+    if (!bSummaryDirty || MeasuredFrameCount == 0) return;
 
     FString Text = TEXT("処理,平均_ms,最小_ms,最大_ms\n");
     for (int32 I = 0; I < static_cast<int32>(EAp5ProfileProcess::Count); ++I)
