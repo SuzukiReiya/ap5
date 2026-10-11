@@ -176,11 +176,14 @@ void AAp5Monster::RebuildMesh(int32 Index)
             EAp5ProfileProcess::DynamicMeshOther,OtherMilliseconds);
 
         const int32 FaceCount=static_cast<int32>(Surface.size());
-        UE_LOG(LogTemp, Display,
-            TEXT("AP5_DYNAMIC_MESH: piece=%d fixed=%d faces=%d generated_vertices=%d generated_normals=%d triangles=%d total_ms=%.3f attributes_ms=%.3f vertex_normal_ms=%.3f triangle_normal_ms=%.3f other_ms=%.3f"),
-            Index,State.Fixed ? 1 : 0,FaceCount,FaceCount*3,FaceCount*3,FaceCount,
-            TotalMilliseconds,AttributesMilliseconds,VertexNormalMilliseconds,
-            TriangleNormalMilliseconds,OtherMilliseconds);
+        {
+            FAp5ProfileScope Profile(EAp5ProfileProcess::ProfilerIO);
+            UE_LOG(LogTemp, Display,
+                TEXT("AP5_DYNAMIC_MESH: piece=%d fixed=%d faces=%d generated_vertices=%d generated_normals=%d triangles=%d total_ms=%.3f attributes_ms=%.3f vertex_normal_ms=%.3f triangle_normal_ms=%.3f other_ms=%.3f"),
+                Index,State.Fixed ? 1 : 0,FaceCount,FaceCount*3,FaceCount*3,FaceCount,
+                TotalMilliseconds,AttributesMilliseconds,VertexNormalMilliseconds,
+                TriangleNormalMilliseconds,OtherMilliseconds);
+        }
     }
 
     {
