@@ -5,6 +5,7 @@
 #include "Misc/CoreDelegates.h"
 #include "RenderTimer.h"
 #include "UnrealClient.h"
+#include "DynamicRHI.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 
@@ -104,7 +105,7 @@ void FAp5FrameProfiler::HandleEndFrame()
     CurrentMilliseconds[static_cast<int32>(EAp5ProfileProcess::EngineRHIThreadCPU)]=
         FPlatformTime::ToMilliseconds(GRHIThreadTime);
     CurrentMilliseconds[static_cast<int32>(EAp5ProfileProcess::EngineGPU)]=
-        FPlatformTime::ToMilliseconds(GGPUFrameTime);
+        FPlatformTime::ToMilliseconds(RHIGetGPUFrameCycles(0));
 
     const double FrameMilliseconds=
         (FPlatformTime::Seconds()-FrameStartedSeconds)*1000.0;
