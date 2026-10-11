@@ -23,6 +23,8 @@ enum class EAp5ProfileProcess : uint8
     PhysicsVelocityRestore,
     ComponentCreate,
     ProfilerIO,
+    FrameLimiterWait,
+    FrameLimiterOvershoot,
     Unmeasured,
     Count
 };
