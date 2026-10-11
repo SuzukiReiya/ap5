@@ -23,7 +23,10 @@ struct Piece
     bool Driven=false;
     // 駆動部位を識別する。-1は非駆動、0は従来の右腕、1/2は左右脚。
     int DriveId=-1;
-    Point JointPivot, JointAnchor;
+    // ParentDriveId>=0 の部位は親側の ParentAnchor が残っている間だけ拘束される。
+    // 例：下腿は大腿の膝側アンカーが欠損したら自由破片へ移行する。
+    int ParentDriveId=-1;
+    Point JointPivot, JointAnchor, ParentAnchor;
 
     Point Translation;
     Point AxisX=Point(1,0,0), AxisY=Point(0,1,0), AxisZ=Point(0,0,1);
@@ -61,8 +64,9 @@ struct Piece
 struct DrivenPartSetup
 {
     Field Volume;
-    Point JointPivot, JointAnchor;
+    Point JointPivot, JointAnchor, ParentAnchor;
     int DriveId=-1;
+    int ParentDriveId=-1;
 };
 
 class PieceCollection
@@ -151,12 +155,51 @@ public:
             Part.Volume=Setup.Volume;
             Part.Driven=true;
             Part.DriveId=Setup.DriveId;
+            Part.ParentDriveId=Setup.ParentDriveId;
             Part.Fixed=true;
             Part.JointPivot=Setup.JointPivot;
             Part.JointAnchor=Setup.JointAnchor;
+            Part.ParentAnchor=Setup.ParentAnchor;
             Items.push_back(std::move(Part));
         }
         return true;
+    }
+
+    // 親関節との材料接続を失った子関節を自由化する。
+    // 多段チェーンにも使えるよう、変化がなくなるまで繰り返す。
+    int ReleaseOrphanedDrivenParts(std::vector<int>& Released)
+    {
+        Released.clear();
+        bool Changed=true;
+        while (Changed)
+        {
+            Changed=false;
+            for (size_t I=0;I<Items.size();++I)
+            {
+                Piece& Child=Items[I];
+                if (!Child.Driven || Child.ParentDriveId<0) continue;
+
+                const Piece* Parent=nullptr;
+                for (const Piece& Candidate : Items)
+                {
+                    if (Candidate.Driven && Candidate.DriveId==Child.ParentDriveId)
+                    {
+                        Parent=&Candidate;
+                        break;
+                    }
+                }
+                if (Parent!=nullptr && Parent->Volume.Sample(Child.ParentAnchor)<0) continue;
+
+                Child.Driven=false;
+                Child.DriveId=-1;
+                Child.ParentDriveId=-1;
+                Child.Fixed=false;
+                Child.Motion.Landed=false;
+                Released.push_back(static_cast<int>(I));
+                Changed=true;
+            }
+        }
+        return static_cast<int>(Released.size());
     }
 
     // 先に全対象の加工結果を準備する。分離上限に達したら一切変更しない。
@@ -464,8 +507,10 @@ private:
         ParentState.Motion=Items[Index].Motion;
         ParentState.Driven=Items[Index].Driven;
         ParentState.DriveId=Items[Index].DriveId;
+        ParentState.ParentDriveId=Items[Index].ParentDriveId;
         ParentState.JointPivot=Items[Index].JointPivot;
         ParentState.JointAnchor=Items[Index].JointAnchor;
+        ParentState.ParentAnchor=Items[Index].ParentAnchor;
         ParentState.Translation=Items[Index].Translation;
         ParentState.AxisX=Items[Index].AxisX;
         ParentState.AxisY=Items[Index].AxisY;
@@ -476,7 +521,9 @@ private:
         Items[Index].Origin=NewOrigin;
         Items[Index].Driven=ParentState.Driven && Items[Index].Volume.Sample(ParentState.JointAnchor)<0;
         Items[Index].DriveId=Items[Index].Driven ? ParentState.DriveId : -1;
+        Items[Index].ParentDriveId=Items[Index].Driven ? ParentState.ParentDriveId : -1;
         Items[Index].JointPivot=ParentState.JointPivot;
+        Items[Index].ParentAnchor=ParentState.ParentAnchor;
         Items[Index].JointAnchor=ParentState.JointAnchor;
         Items[Index].Fixed=ParentFixed
             && (ParentState.Driven ? Items[Index].Driven : HasStableSupport(Items[Index].Volume));
@@ -490,6 +537,7 @@ private:
             Child.Volume=std::move(Parts[J]);
             Child.Driven=ParentState.Driven && Child.Volume.Sample(ParentState.JointAnchor)<0;
             Child.DriveId=Child.Driven ? ParentState.DriveId : -1;
+            Child.ParentDriveId=Child.Driven ? ParentState.ParentDriveId : -1;
             Child.Fixed=ParentFixed
                 && (ParentState.Driven ? Child.Driven : HasStableSupport(Child.Volume));
             Child.Motion.Landed=false;
