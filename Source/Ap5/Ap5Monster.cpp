@@ -120,12 +120,23 @@ void AAp5Monster::RebuildMesh(int32 Index)
 
     UE::Geometry::FDynamicMesh3 Mesh;
     {
-        FAp5ProfileScope Profile(EAp5ProfileProcess::DynamicMeshBuild);
+        // DynamicMesh構築は現在の主要ボトルネックなので、内部を高分解能で計測する。
+        // 内側ループへScopeオブジェクトを大量生成せず、Cycles64の差分だけを加算して
+        // 計測そのものによる負荷をできるだけ小さくする。
+        const uint64 DynamicMeshStartedCycles=FPlatformTime::Cycles64();
+
+        const uint64 AttributesStartedCycles=FPlatformTime::Cycles64();
         Mesh.EnableAttributes();
+        const uint64 AttributesCycles=FPlatformTime::Cycles64()-AttributesStartedCycles;
+
+        uint64 VertexNormalCycles=0;
+        uint64 TriangleNormalCycles=0;
         for (const Ap5Volume::Triangle& Face : Surface)
         {
             int32 Vertices[3];
             int32 Normals[3];
+
+            const uint64 VertexNormalStartedCycles=FPlatformTime::Cycles64();
             for (int32 K = 0; K < 3; ++K)
             {
                 const Ap5Volume::Point& P = Face.Vertices[K];
@@ -134,11 +145,42 @@ void AAp5Monster::RebuildMesh(int32 Index)
                 Normals[K] = Mesh.Attributes()->PrimaryNormals()->AppendElement(
                     FVector3f(static_cast<float>(N.X), static_cast<float>(N.Y), static_cast<float>(N.Z)));
             }
+            VertexNormalCycles+=FPlatformTime::Cycles64()-VertexNormalStartedCycles;
+
+            const uint64 TriangleNormalStartedCycles=FPlatformTime::Cycles64();
             const int32 Triangle = Mesh.AppendTriangle(Vertices[0], Vertices[1], Vertices[2]);
             check(Triangle >= 0);
             Mesh.Attributes()->PrimaryNormals()->SetTriangle(Triangle,
                 UE::Geometry::FIndex3i(Normals[0], Normals[1], Normals[2]));
+            TriangleNormalCycles+=FPlatformTime::Cycles64()-TriangleNormalStartedCycles;
         }
+
+        const uint64 DynamicMeshTotalCycles=FPlatformTime::Cycles64()-DynamicMeshStartedCycles;
+        const uint64 MeasuredCycles=AttributesCycles+VertexNormalCycles+TriangleNormalCycles;
+        const uint64 OtherCycles=DynamicMeshTotalCycles>MeasuredCycles
+            ? DynamicMeshTotalCycles-MeasuredCycles : 0;
+
+        const double AttributesMilliseconds=FPlatformTime::ToMilliseconds64(AttributesCycles);
+        const double VertexNormalMilliseconds=FPlatformTime::ToMilliseconds64(VertexNormalCycles);
+        const double TriangleNormalMilliseconds=FPlatformTime::ToMilliseconds64(TriangleNormalCycles);
+        const double OtherMilliseconds=FPlatformTime::ToMilliseconds64(OtherCycles);
+        const double TotalMilliseconds=FPlatformTime::ToMilliseconds64(DynamicMeshTotalCycles);
+
+        FAp5FrameProfiler::Get().AddMilliseconds(
+            EAp5ProfileProcess::DynamicMeshAttributes,AttributesMilliseconds);
+        FAp5FrameProfiler::Get().AddMilliseconds(
+            EAp5ProfileProcess::DynamicMeshVertexNormalAppend,VertexNormalMilliseconds);
+        FAp5FrameProfiler::Get().AddMilliseconds(
+            EAp5ProfileProcess::DynamicMeshTriangleNormalBind,TriangleNormalMilliseconds);
+        FAp5FrameProfiler::Get().AddMilliseconds(
+            EAp5ProfileProcess::DynamicMeshOther,OtherMilliseconds);
+
+        const int32 FaceCount=static_cast<int32>(Surface.size());
+        UE_LOG(LogTemp, Display,
+            TEXT("AP5_DYNAMIC_MESH: piece=%d fixed=%d faces=%d generated_vertices=%d generated_normals=%d triangles=%d total_ms=%.3f attributes_ms=%.3f vertex_normal_ms=%.3f triangle_normal_ms=%.3f other_ms=%.3f"),
+            Index,State.Fixed ? 1 : 0,FaceCount,FaceCount*3,FaceCount*3,FaceCount,
+            TotalMilliseconds,AttributesMilliseconds,VertexNormalMilliseconds,
+            TriangleNormalMilliseconds,OtherMilliseconds);
     }
 
     {
