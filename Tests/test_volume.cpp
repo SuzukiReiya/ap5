@@ -52,6 +52,14 @@ int main()
     Volume.Initialize(Point(55,72,85));
     assert(Volume.Sample(Point(0,0,0))<0);
     CheckSurface(Volume);
+    const Ap5Volume::IndexedSurface Indexed=Volume.BuildIndexedSurface();
+    assert(!Indexed.Vertices.empty() && Indexed.Vertices.size()==Indexed.Normals.size());
+    assert(!Indexed.Triangles.empty());
+    assert(Indexed.Vertices.size()<Indexed.Triangles.size()*3);
+    for (const Ap5Volume::IndexedTriangle& Face : Indexed.Triangles)
+        for (int K=0;K<3;++K)
+            assert(Face.Vertices[K]>=0
+                && Face.Vertices[K]<static_cast<int>(Indexed.Vertices.size()));
     // 以前の裏面表示を再発させないよう、外向き法線とUE用頂点順の関係を検証する。
     for (const Triangle& T : Volume.Surface())
     {
