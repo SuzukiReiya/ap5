@@ -19,28 +19,6 @@ Ap5Volume::Point VolumePoint(const FVector& P) { return Ap5Volume::Point(P.X,P.Y
 FVector EnginePoint(const Ap5Volume::Point& P) { return FVector(P.X,P.Y,P.Z); }
 
 constexpr double RenderChunkSizeCm = 80.0;
-constexpr uint64 FnvOffset = 1469598103934665603ull;
-constexpr uint64 FnvPrime = 1099511628211ull;
-
-uint64 HashInt64(uint64 Hash, int64 Value)
-{
-    uint64 Bits=static_cast<uint64>(Value);
-    for (int32 I=0;I<8;++I)
-    {
-        Hash^=(Bits & 0xffull);
-        Hash*=FnvPrime;
-        Bits>>=8;
-    }
-    return Hash;
-}
-
-uint64 HashPoint(uint64 Hash,const Ap5Volume::Point& P,double Scale)
-{
-    Hash=HashInt64(Hash,static_cast<int64>(std::llround(P.X*Scale)));
-    Hash=HashInt64(Hash,static_cast<int64>(std::llround(P.Y*Scale)));
-    Hash=HashInt64(Hash,static_cast<int64>(std::llround(P.Z*Scale)));
-    return Hash;
-}
 
 }
 
@@ -159,7 +137,7 @@ void AAp5Monster::RebuildMesh(int32 Index)
     Ap5Volume::IndexedSurface Surface;
     {
         FAp5ProfileScope Profile(EAp5ProfileProcess::SurfaceBuild);
-        Surface = State.RebuildIndexedSurface();
+        Surface = State.RebuildIndexedSurface(RenderChunkSizeCm);
     }
 
     UpdateVisualChunks(Index,Surface);
@@ -245,49 +223,22 @@ void AAp5Monster::UpdateVisualChunks(int32 Index,const Ap5Volume::IndexedSurface
     if (!PieceMeshes.IsValidIndex(Index)) return;
     while (PieceVisualChunks.Num()<=Index) PieceVisualChunks.AddDefaulted();
 
-    struct FChunkBuild
-    {
-        uint64 Signature=FnvOffset;
-        TArray<int32> Triangles;
-    };
-
-    TMap<FIntVector,FChunkBuild> Builds;
+    TMap<FIntVector,FVisualChunkState>& Existing=PieceVisualChunks[Index];
+    TSet<FIntVector> PresentChunks;
     {
         const uint64 Started=FPlatformTime::Cycles64();
-        for (int32 TriangleIndex=0;
-            TriangleIndex<static_cast<int32>(Surface.Triangles.size());++TriangleIndex)
-        {
-            const Ap5Volume::IndexedTriangle& Face=
-                Surface.Triangles[static_cast<size_t>(TriangleIndex)];
-            const Ap5Volume::Point& A=Surface.Vertices[Face.Vertices[0]];
-            const Ap5Volume::Point& B=Surface.Vertices[Face.Vertices[1]];
-            const Ap5Volume::Point& C=Surface.Vertices[Face.Vertices[2]];
-            const Ap5Volume::Point Center=(A+B+C)*(1.0/3.0);
-            const FIntVector Key(
-                FMath::FloorToInt(Center.X/RenderChunkSizeCm),
-                FMath::FloorToInt(Center.Y/RenderChunkSizeCm),
-                FMath::FloorToInt(Center.Z/RenderChunkSizeCm));
-            FChunkBuild& Build=Builds.FindOrAdd(Key);
-            Build.Triangles.Add(TriangleIndex);
-            // グローバル頂点IDは他チャンクの編集でずれるため、実座標と法線を署名にする。
-            for (int32 K=0;K<3;++K)
-            {
-                const int32 Vertex=Face.Vertices[K];
-                Build.Signature=HashPoint(Build.Signature,Surface.Vertices[Vertex],1000.0);
-                Build.Signature=HashPoint(Build.Signature,Surface.Normals[Vertex],1000000.0);
-            }
-        }
+        PresentChunks.Reserve(static_cast<int32>(Surface.Chunks.size()));
+        for (const Ap5Volume::IndexedSurfaceChunk& Chunk : Surface.Chunks)
+            PresentChunks.Add(FIntVector(Chunk.X,Chunk.Y,Chunk.Z));
         FAp5FrameProfiler::Get().AddMilliseconds(
             EAp5ProfileProcess::DynamicMeshOther,
             FPlatformTime::ToMilliseconds64(FPlatformTime::Cycles64()-Started));
     }
 
-    TMap<FIntVector,FVisualChunkState>& Existing=PieceVisualChunks[Index];
-
     // 消えたチャンクだけ破棄する。
     TArray<FIntVector> Removed;
     for (const TPair<FIntVector,FVisualChunkState>& Pair : Existing)
-        if (!Builds.Contains(Pair.Key)) Removed.Add(Pair.Key);
+        if (!PresentChunks.Contains(Key)) Removed.Add(Key);
     for (const FIntVector& Key : Removed)
     {
         if (FVisualChunkState* State=Existing.Find(Key))
@@ -295,10 +246,11 @@ void AAp5Monster::UpdateVisualChunks(int32 Index,const Ap5Volume::IndexedSurface
         Existing.Remove(Key);
     }
 
-    for (TPair<FIntVector,FChunkBuild>& Pair : Builds)
+    for (const Ap5Volume::IndexedSurfaceChunk& SurfaceChunk : Surface.Chunks)
     {
-        FVisualChunkState* Current=Existing.Find(Pair.Key);
-        if (Current!=nullptr && Current->Signature==Pair.Value.Signature
+        const FIntVector Key(SurfaceChunk.X,SurfaceChunk.Y,SurfaceChunk.Z);
+        FVisualChunkState* Current=Existing.Find(Key);
+        if (Current!=nullptr && Current->Signature==SurfaceChunk.Signature
             && IsValid(Current->Component))
             continue;
 
@@ -316,9 +268,9 @@ void AAp5Monster::UpdateVisualChunks(int32 Index,const Ap5Volume::IndexedSurface
         }
 
         TMap<int32,int32> VertexRemap;
-        VertexRemap.Reserve(Pair.Value.Triangles.Num()*2);
+        VertexRemap.Reserve(SurfaceChunk.Triangles.Num()*2);
 
-        for (int32 SurfaceTriangleIndex : Pair.Value.Triangles)
+        for (int32 SurfaceTriangleIndex : SurfaceChunk.Triangles)
         {
             const Ap5Volume::IndexedTriangle& Face=
                 Surface.Triangles[static_cast<size_t>(SurfaceTriangleIndex)];
@@ -363,9 +315,9 @@ void AAp5Monster::UpdateVisualChunks(int32 Index,const Ap5Volume::IndexedSurface
             Chunk->SetMesh(MoveTemp(Mesh));
         }
 
-        FVisualChunkState& Stored=Existing.FindOrAdd(Pair.Key);
+        FVisualChunkState& Stored=Existing.FindOrAdd(Key);
         Stored.Component=Chunk;
-        Stored.Signature=Pair.Value.Signature;
+        Stored.Signature=SurfaceChunk.Signature;
     }
 }
 
