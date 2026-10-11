@@ -78,11 +78,22 @@ void AAp5Monster::AddPart(FName Name, const FVector& Center,
     Shapes.push_back(Shape);
 
     const FString PartName=Name.ToString();
-    const bool bLegPart=PartName.Contains(TEXT("Thigh"))
-        || PartName.Contains(TEXT("Shin")) || PartName.Contains(TEXT("Foot"));
-    if (bLegPart && PartName.StartsWith(TEXT("Left"))) LeftLegShapes.push_back(Shape);
-    else if (bLegPart && PartName.StartsWith(TEXT("Right"))) RightLegShapes.push_back(Shape);
-    else BodyShapes.push_back(Shape);
+    const bool bLeft=PartName.StartsWith(TEXT("Left"));
+    const bool bRight=PartName.StartsWith(TEXT("Right"));
+    if (PartName.Contains(TEXT("Thigh")))
+    {
+        if (bLeft) LeftThighShapes.push_back(Shape);
+        else if (bRight) RightThighShapes.push_back(Shape);
+    }
+    else if (PartName.Contains(TEXT("Shin")) || PartName.Contains(TEXT("Foot")))
+    {
+        if (bLeft) LeftLowerLegShapes.push_back(Shape);
+        else if (bRight) RightLowerLegShapes.push_back(Shape);
+    }
+    else
+    {
+        BodyShapes.push_back(Shape);
+    }
 }
 
 UDynamicMeshComponent* AAp5Monster::CreatePiece()
@@ -769,28 +780,72 @@ bool AAp5Monster::ToggleArmMotionTest()
 void AAp5Monster::UpdateLegMotion(float DeltaSeconds)
 {
     if (!bLegMotionTest) return;
+
+    std::vector<int> Released;
+    if (Pieces.ReleaseOrphanedDrivenParts(Released)>0)
+    {
+        for (int Index : Released)
+            if (PieceMeshes.IsValidIndex(Index)) RebuildMesh(Index);
+        UE_LOG(LogTemp, Display, TEXT("AP5_LEG_CHAIN_RELEASE: count=%d"),
+            static_cast<int32>(Released.size()));
+    }
+
     LegMotionTime+=FMath::Max(0.0f,DeltaSeconds);
     const float Frequency=2.0f*PI/1.8f;
     const float Phase=LegMotionTime*Frequency;
-    const float BaseAngle=FMath::DegreesToRadians(22.0f*FMath::Sin(Phase));
-    const float BaseAngularSpeed=FMath::DegreesToRadians(22.0f)*Frequency*FMath::Cos(Phase);
+    const float Swing=FMath::Sin(Phase);
+    const float SwingSpeed=Frequency*FMath::Cos(Phase);
 
     for (int32 I=0;I<static_cast<int32>(Pieces.Items.size());++I)
     {
         Ap5Volume::Piece& State=Pieces.Items[I];
-        if (!State.Driven || !State.Fixed || !PieceMeshes.IsValidIndex(I)
-            || (State.DriveId!=1 && State.DriveId!=2))
-            continue;
+        if (!State.Driven || !State.Fixed || !PieceMeshes.IsValidIndex(I)) continue;
 
-        const float SideSign=State.DriveId==1 ? 1.0f : -1.0f;
-        const float AngleRadians=BaseAngle*SideSign;
-        const float AngularSpeed=BaseAngularSpeed*SideSign;
-        const FQuat Rotation(FVector::RightVector,AngleRadians);
-        const FVector Pivot=EnginePoint(State.JointPivot);
-        const FVector RotatedPivot=Rotation.RotateVector(Pivot);
-        const FVector Translation=Pivot-RotatedPivot;
-        const FVector Omega=FVector::RightVector*AngularSpeed;
-        const FVector OriginVelocity=-FVector::CrossProduct(Omega,RotatedPivot);
+        const bool bLeftThigh=State.DriveId==1;
+        const bool bRightThigh=State.DriveId==2;
+        const bool bLeftLower=State.DriveId==3;
+        const bool bRightLower=State.DriveId==4;
+        if (!bLeftThigh && !bRightThigh && !bLeftLower && !bRightLower) continue;
+
+        const bool bLeft=bLeftThigh || bLeftLower;
+        const float SideSign=bLeft ? 1.0f : -1.0f;
+        const float LegSwing=Swing*SideSign;
+        const float LegSwingSpeed=SwingSpeed*SideSign;
+
+        const float HipDegrees=20.0f*LegSwing;
+        const float HipSpeedDegrees=20.0f*LegSwingSpeed;
+        const float HipAngle=FMath::DegreesToRadians(HipDegrees);
+        const float HipAngularSpeed=FMath::DegreesToRadians(HipSpeedDegrees);
+        const FVector HipPivot=FVector(0.0f,bLeft ? -34.0f : 34.0f,118.0f);
+        const FQuat HipRotation(FVector::RightVector,HipAngle);
+        const FVector HipRotatedPivot=HipRotation.RotateVector(HipPivot);
+        const FVector HipTranslation=HipPivot-HipRotatedPivot;
+        const FVector HipOmega=FVector::RightVector*HipAngularSpeed;
+
+        FQuat Rotation=HipRotation;
+        FVector Translation=HipTranslation;
+        FVector Omega=HipOmega;
+        FVector OriginVelocity=-FVector::CrossProduct(HipOmega,HipRotatedPivot);
+
+        if (bLeftLower || bRightLower)
+        {
+            // 振り出している脚ほど膝を曲げる。0～32度の範囲で下腿だけを追加回転。
+            const float Lift=FMath::Clamp((LegSwing+1.0f)*0.5f,0.0f,1.0f);
+            const float KneeDegrees=-32.0f*Lift;
+            const float KneeSpeedDegrees=-16.0f*LegSwingSpeed;
+            const float KneeAngle=FMath::DegreesToRadians(KneeDegrees);
+            const float KneeAngularSpeed=FMath::DegreesToRadians(KneeSpeedDegrees);
+            const FVector KneePivot=FVector(0.0f,bLeft ? -36.0f : 36.0f,66.0f);
+            const FVector KneeWorld=HipRotation.RotateVector(KneePivot)+HipTranslation;
+            const FVector KneeVelocity=OriginVelocity
+                +FVector::CrossProduct(HipOmega,HipRotation.RotateVector(KneePivot));
+            const FQuat KneeRotation(FVector::RightVector,KneeAngle);
+            Rotation=KneeRotation*HipRotation;
+            Omega=FVector::RightVector*(HipAngularSpeed+KneeAngularSpeed);
+            const FVector RotatedKnee=Rotation.RotateVector(KneePivot);
+            Translation=KneeWorld-RotatedKnee;
+            OriginVelocity=KneeVelocity-FVector::CrossProduct(Omega,RotatedKnee);
+        }
 
         State.AxisX=VolumePoint(Rotation.RotateVector(FVector::ForwardVector));
         State.AxisY=VolumePoint(Rotation.RotateVector(FVector::RightVector));
@@ -833,19 +888,38 @@ void AAp5Monster::ResetShape()
     }
     else if (bLegMotionTest)
     {
-        Ap5Volume::Field BodyVolume,LeftLegVolume,RightLegVolume;
+        Ap5Volume::Field BodyVolume,LeftThigh,LeftLower,RightThigh,RightLower;
         BodyVolume.InitializeUnion(BodyShapes);
-        LeftLegVolume.InitializeUnion(LeftLegShapes);
-        RightLegVolume.InitializeUnion(RightLegShapes);
-        std::vector<Ap5Volume::DrivenPartSetup> DrivenParts(2);
-        DrivenParts[0].Volume=std::move(LeftLegVolume);
+        LeftThigh.InitializeUnion(LeftThighShapes);
+        LeftLower.InitializeUnion(LeftLowerLegShapes);
+        RightThigh.InitializeUnion(RightThighShapes);
+        RightLower.InitializeUnion(RightLowerLegShapes);
+
+        std::vector<Ap5Volume::DrivenPartSetup> DrivenParts(4);
+        DrivenParts[0].Volume=std::move(LeftThigh);
         DrivenParts[0].JointPivot=Ap5Volume::Point(0,-34,118);
         DrivenParts[0].JointAnchor=Ap5Volume::Point(0,-34,112);
         DrivenParts[0].DriveId=1;
-        DrivenParts[1].Volume=std::move(RightLegVolume);
+
+        DrivenParts[1].Volume=std::move(RightThigh);
         DrivenParts[1].JointPivot=Ap5Volume::Point(0,34,118);
         DrivenParts[1].JointAnchor=Ap5Volume::Point(0,34,112);
         DrivenParts[1].DriveId=2;
+
+        DrivenParts[2].Volume=std::move(LeftLower);
+        DrivenParts[2].JointPivot=Ap5Volume::Point(0,-36,66);
+        DrivenParts[2].JointAnchor=Ap5Volume::Point(0,-36,66);
+        DrivenParts[2].ParentAnchor=Ap5Volume::Point(0,-34,66);
+        DrivenParts[2].DriveId=3;
+        DrivenParts[2].ParentDriveId=1;
+
+        DrivenParts[3].Volume=std::move(RightLower);
+        DrivenParts[3].JointPivot=Ap5Volume::Point(0,36,66);
+        DrivenParts[3].JointAnchor=Ap5Volume::Point(0,36,66);
+        DrivenParts[3].ParentAnchor=Ap5Volume::Point(0,34,66);
+        DrivenParts[3].DriveId=4;
+        DrivenParts[3].ParentDriveId=2;
+
         ArticulatedReady=Pieces.ResetDrivenParts(
             BodyVolume,DrivenParts,{Ap5Volume::Point(0,0,170)});
     }
