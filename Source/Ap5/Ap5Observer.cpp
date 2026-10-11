@@ -79,7 +79,8 @@ bool AAp5Observer::FireProjectile(bool bExplosive)
 
 void AAp5Observer::PlayerTick(float DeltaTime)
 {
-    FAp5FrameProfiler::Get().BeginFrame();
+    // Singleton生成時にOnBeginFrame/OnEndFrameへ登録される。
+    FAp5FrameProfiler::Get();
     Super::PlayerTick(DeltaTime);
     if (!IsLocalController() || ObservationCamera == nullptr)
     {
