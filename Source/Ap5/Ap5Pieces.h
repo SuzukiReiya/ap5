@@ -207,6 +207,23 @@ public:
         return static_cast<int>(Released.size());
     }
 
+    // 支持を完全に失ったとき、現在の全Pieceを関節拘束から外して物理自由化する。
+    // 歩行速度と転倒角速度を加算し、直前の関節速度は保持する。
+    void ReleaseAllForPhysics(const Point& AddedVelocity,const Point& AddedAngularVelocity)
+    {
+        for (Piece& P : Items)
+        {
+            if (P.Volume.MaterialCount()==0) continue;
+            P.Fixed=false;
+            P.Driven=false;
+            P.DriveId=-1;
+            P.ParentDriveId=-1;
+            P.Motion.Landed=false;
+            P.OriginVelocity=P.OriginVelocity+AddedVelocity;
+            P.AngularVelocity=P.AngularVelocity+AddedAngularVelocity;
+        }
+    }
+
     // 先に全対象の加工結果を準備する。分離上限に達したら一切変更しない。
     int Brush(const Point& Start,const Point& Direction,double Radius,bool Repair,std::vector<int>& Changed,int MaximumPieces=33)
     {
