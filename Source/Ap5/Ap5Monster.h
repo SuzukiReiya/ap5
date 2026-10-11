@@ -59,6 +59,7 @@ private:
     void RefreshPieces(const std::vector<int>& Changed);
     void UpdateArmMotion(float DeltaSeconds);
     void UpdateLegMotion(float DeltaSeconds);
+    bool IsDrivenFootGrounded(int32 DriveId) const;
     double ImpactResistanceAt(const Ap5Volume::Point& LocalHit, FString& MaterialName) const;
     int32 SelectedJoinPiece = INDEX_NONE;
     int32 GrabbedPiece = INDEX_NONE;
@@ -72,6 +73,8 @@ private:
     float LegMotionTime = 0.0f;
     float LegWalkDistance = 0.0f;
     bool bLegWalkBlocked = false;
+    int32 ActiveSupportDriveId = INDEX_NONE;
+    float LegSupportLossSeconds = 0.0f;
     FTransform LegMotionOriginTransform = FTransform::Identity;
     std::vector<Ap5Volume::Ellipsoid> Shapes;
     std::vector<Ap5Volume::Ellipsoid> BodyShapes;
