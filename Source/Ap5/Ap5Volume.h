@@ -4,7 +4,6 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
-#include <unordered_map>
 #include <vector>
 #include <utility>
 
@@ -518,24 +517,33 @@ public:
     IndexedSurface BuildIndexedSurface() const
     {
         IndexedSurface Result;
-        std::unordered_map<std::uint64_t,int> EdgeVertices;
-        EdgeVertices.reserve(std::max<size_t>(64,Values.size()/4));
+        // 6四面体分割で使う辺は、格子点から +X/+Y/+Z とその組み合わせの7種類だけ。
+        // unordered_mapで座標ペアを検索せず、格子点×7の直接表で共有頂点IDを引く。
+        std::vector<int> EdgeVertices(Values.size()*7,-1);
+        Result.Vertices.reserve(std::max<size_t>(64,Values.size()/8));
+        Result.Normals.reserve(Result.Vertices.capacity());
+        Result.Triangles.reserve(std::max<size_t>(64,Values.size()/4));
 
         // 隣接セルと面の対角線が一致する6四面体分割。
         const int Corners[8][3] = {{0,0,0},{1,0,0},{1,1,0},{0,1,0},{0,0,1},{1,0,1},{1,1,1},{0,1,1}};
         const int Tetrahedra[6][4] = {{0,1,2,6},{0,2,3,6},{0,3,7,6},{0,7,4,6},{0,4,5,6},{0,5,1,6}};
         for (int Z=0; Z<NZ-1; ++Z) for (int Y=0; Y<NY-1; ++Y) for (int X=0; X<NX-1; ++X)
         {
-            Point P[8]; double V[8]; int GridIndex[8]; int Negative = 0;
+            double V[8]; int GridIndex[8]; int Negative = 0;
             for (int C=0; C<8; ++C)
             {
                 const int GX=X+Corners[C][0], GY=Y+Corners[C][1], GZ=Z+Corners[C][2];
-                P[C] = Position(GX,GY,GZ);
                 GridIndex[C] = Index(GX,GY,GZ);
                 V[C] = Values[GridIndex[C]];
                 if (V[C] < 0) ++Negative;
             }
             if (Negative == 0 || Negative == 8) continue;
+
+            // 大半のセルは全面内側/外側なので、座標生成は表面セルだけに限定する。
+            Point P[8];
+            for (int C=0;C<8;++C)
+                P[C]=Position(X+Corners[C][0],Y+Corners[C][1],Z+Corners[C][2]);
+
             for (int T=0; T<6; ++T)
             {
                 int Inside[4], Outside[4], NI=0, NO=0;
@@ -603,29 +611,37 @@ private:
     {
         return P[A]+(P[B]-P[A])*(V[A]/(V[A]-V[B]));
     }
-    static std::uint64_t EdgeKey(int A,int B)
+    int EdgeSlot(int A,int B) const
     {
-        const std::uint32_t Low=static_cast<std::uint32_t>(std::min(A,B));
-        const std::uint32_t High=static_cast<std::uint32_t>(std::max(A,B));
-        return (static_cast<std::uint64_t>(Low)<<32)|High;
+        const int AX=A%NX, AY=(A/NX)%NY, AZ=A/(NX*NY);
+        const int BX=B%NX, BY=(B/NX)%NY, BZ=B/(NX*NY);
+        const int DX=BX-AX, DY=BY-AY, DZ=BZ-AZ;
+
+        // 現在の6四面体分割では各辺の非ゼロ成分は同符号。
+        const bool Forward=(DX>0 || (DX==0 && (DY>0 || (DY==0 && DZ>0))));
+        const int SX=Forward ? DX : -DX;
+        const int SY=Forward ? DY : -DY;
+        const int SZ=Forward ? DZ : -DZ;
+        const int Start=Forward ? A : B;
+        const int Code=(SX!=0 ? 1 : 0) | (SY!=0 ? 2 : 0) | (SZ!=0 ? 4 : 0);
+        return Start*7+(Code-1);
     }
 
-    int SurfaceVertex(IndexedSurface& Result,std::unordered_map<std::uint64_t,int>& EdgeVertices,
+    int SurfaceVertex(IndexedSurface& Result,std::vector<int>& EdgeVertices,
         const Point* P,const double* V,const int* GridIndex,int A,int B) const
     {
-        const std::uint64_t Key=EdgeKey(GridIndex[A],GridIndex[B]);
-        const auto Existing=EdgeVertices.find(Key);
-        if (Existing!=EdgeVertices.end()) return Existing->second;
+        const int Slot=EdgeSlot(GridIndex[A],GridIndex[B]);
+        if (EdgeVertices[Slot]>=0) return EdgeVertices[Slot];
 
         const Point PositionOnEdge=Intersect(P,V,A,B);
         const int Vertex=static_cast<int>(Result.Vertices.size());
         Result.Vertices.push_back(PositionOnEdge);
         Result.Normals.push_back(Normal(PositionOnEdge));
-        EdgeVertices.emplace(Key,Vertex);
+        EdgeVertices[Slot]=Vertex;
         return Vertex;
     }
 
-    void EmitIndexed(IndexedSurface& Result,std::unordered_map<std::uint64_t,int>& EdgeVertices,
+    void EmitIndexed(IndexedSurface& Result,std::vector<int>& EdgeVertices,
         const Point* P,const double* V,const int* GridIndex,
         int A0,int B0,int A1,int B1,int A2,int B2,const Point& Outward) const
     {
