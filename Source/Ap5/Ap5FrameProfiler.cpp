@@ -14,7 +14,7 @@ const TCHAR* ProcessNames[] =
     TEXT("体積編集・連結判定"),
     TEXT("表面生成"),
     TEXT("DynamicMesh頂点法線初期化"),
-    TEXT("DynamicMesh頂点検索・追加・法線設定"),
+    TEXT("DynamicMesh頂点追加・法線設定"),
     TEXT("DynamicMesh三角形追加"),
     TEXT("DynamicMeshその他"),
     TEXT("Mesh反映"),
