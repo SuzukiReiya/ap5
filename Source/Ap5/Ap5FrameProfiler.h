@@ -58,6 +58,9 @@ private:
 
     static constexpr double SlowFrameThresholdMilliseconds = 20.0; // 50 FPS未満
     static constexpr int32 FileWriteIntervalFrames = 30;
+    // 起動直後はDynamicMesh Component生成・SceneProxy登録・RenderThread追従が集中する。
+    // 実プレイ中の連射性能と混同しないため、最初の120フレームは集計しない。
+    static constexpr int32 WarmupFrameCount = 120;
 
     double FrameStartedSeconds = 0.0;
     bool bFrameOpen = false;
@@ -68,6 +71,7 @@ private:
 
     uint64 SlowFrameCount = 0;
     int32 FramesSinceWrite = 0;
+    int32 WarmupFramesRemaining = WarmupFrameCount;
     bool bSummaryDirty = false;
 };
 
