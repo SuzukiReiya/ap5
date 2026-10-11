@@ -456,6 +456,51 @@ public:
         return Result;
     }
 
+    // 弾中心から材料までの距離近似。格子外では境界までの距離を加算する。
+    // Valuesは厳密なSDFではないが、球形弾の近接判定には十分な近似として使う。
+    double CollisionDistance(const Point& P) const
+    {
+        if (Values.empty()) return 1e9;
+        const Point Low=Origin;
+        const Point High=Origin+Point((NX-1)*Spacing,(NY-1)*Spacing,(NZ-1)*Spacing);
+        const Point Q(
+            std::max(Low.X,std::min(High.X,P.X)),
+            std::max(Low.Y,std::min(High.Y,P.Y)),
+            std::max(Low.Z,std::min(High.Z,P.Z)));
+        return Sample(Q)+(P-Q).Length();
+    }
+
+    double GridSpacing() const { return Spacing; }
+
+    bool SegmentIntersectsBounds(const Point& Start,const Point& End,double Margin) const
+    {
+        if (Values.empty()) return false;
+        const Point Direction=End-Start;
+        const double Low[3]={
+            Origin.X-Margin,Origin.Y-Margin,Origin.Z-Margin};
+        const double High[3]={
+            Origin.X+(NX-1)*Spacing+Margin,
+            Origin.Y+(NY-1)*Spacing+Margin,
+            Origin.Z+(NZ-1)*Spacing+Margin};
+        const double S[3]={Start.X,Start.Y,Start.Z};
+        const double D[3]={Direction.X,Direction.Y,Direction.Z};
+        double Enter=0.0,Exit=1.0;
+        for (int K=0;K<3;++K)
+        {
+            if (std::abs(D[K])<1e-12)
+            {
+                if (S[K]<Low[K] || S[K]>High[K]) return false;
+                continue;
+            }
+            double A=(Low[K]-S[K])/D[K],B=(High[K]-S[K])/D[K];
+            if (B<A) std::swap(A,B);
+            Enter=std::max(Enter,A);
+            Exit=std::min(Exit,B);
+            if (Enter>Exit) return false;
+        }
+        return true;
+    }
+
     std::vector<Triangle> Surface() const
     {
         std::vector<Triangle> Result;
