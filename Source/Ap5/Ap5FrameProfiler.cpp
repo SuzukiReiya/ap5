@@ -3,6 +3,8 @@
 #include "HAL/PlatformTime.h"
 #include "Misc/App.h"
 #include "Misc/CoreDelegates.h"
+#include "RenderTimer.h"
+#include "UnrealClient.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 
@@ -29,7 +31,13 @@ const TCHAR* ProcessNames[] =
     TEXT("プロファイラI/O"),
     TEXT("FPS制限待機"),
     TEXT("FPS制限待機超過"),
-    TEXT("その他（未計測）")
+    TEXT("その他（未計測）"),
+    TEXT("参考_GameThread CPU"),
+    TEXT("参考_GameThread Wait"),
+    TEXT("参考_RenderThread CPU"),
+    TEXT("参考_RenderThread Wait"),
+    TEXT("参考_RHIThread CPU"),
+    TEXT("参考_GPU")
 };
 static_assert(UE_ARRAY_COUNT(ProcessNames) == static_cast<int32>(EAp5ProfileProcess::Count));
 }
@@ -83,6 +91,21 @@ void FAp5FrameProfiler::HandleEndFrame()
     CurrentMilliseconds[static_cast<int32>(EAp5ProfileProcess::FrameLimiterOvershoot)]+=
         OvershootMilliseconds;
 
+    // UEのフレーム統計は自前処理カテゴリと並列・重複するため「参考値」として記録し、
+    // その他（未計測）の差し引きには使わない。
+    CurrentMilliseconds[static_cast<int32>(EAp5ProfileProcess::EngineGameThreadCPU)]=
+        FPlatformTime::ToMilliseconds(GGameThreadTime);
+    CurrentMilliseconds[static_cast<int32>(EAp5ProfileProcess::EngineGameThreadWait)]=
+        FPlatformTime::ToMilliseconds(GGameThreadWaitTime);
+    CurrentMilliseconds[static_cast<int32>(EAp5ProfileProcess::EngineRenderThreadCPU)]=
+        FPlatformTime::ToMilliseconds(GRenderThreadTime);
+    CurrentMilliseconds[static_cast<int32>(EAp5ProfileProcess::EngineRenderThreadWait)]=
+        FPlatformTime::ToMilliseconds(GRenderThreadWaitTime);
+    CurrentMilliseconds[static_cast<int32>(EAp5ProfileProcess::EngineRHIThreadCPU)]=
+        FPlatformTime::ToMilliseconds(GRHIThreadTime);
+    CurrentMilliseconds[static_cast<int32>(EAp5ProfileProcess::EngineGPU)]=
+        FPlatformTime::ToMilliseconds(GGPUFrameTime);
+
     const double FrameMilliseconds=
         (FPlatformTime::Seconds()-FrameStartedSeconds)*1000.0;
     FinalizeCurrentFrame(FrameMilliseconds);
@@ -103,6 +126,7 @@ void FAp5FrameProfiler::FinalizeCurrentFrame(double FrameMilliseconds)
 
     double MeasuredMilliseconds = 0.0;
     const int32 UnmeasuredIndex = static_cast<int32>(EAp5ProfileProcess::Unmeasured);
+    // Unmeasuredより後ろはGame/Render/GPUの参考値で、並列実行されるため加算しない。
     for (int32 I = 0; I < UnmeasuredIndex; ++I) MeasuredMilliseconds += CurrentMilliseconds[I];
     CurrentMilliseconds[UnmeasuredIndex] =
         FMath::Max(0.0,FrameMilliseconds-MeasuredMilliseconds);
