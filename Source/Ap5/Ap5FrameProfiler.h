@@ -31,13 +31,13 @@ class FAp5FrameProfiler
 {
 public:
     static FAp5FrameProfiler& Get();
-
-    // PlayerTickの先頭から各フレーム1回呼び、前回呼び出しからの実時間を1フレームとして確定する。
-    void BeginFrame();
     void AddMilliseconds(EAp5ProfileProcess Process, double Milliseconds);
 
 private:
-    FAp5FrameProfiler() = default;
+    FAp5FrameProfiler();
+    ~FAp5FrameProfiler();
+    void HandleBeginFrame();
+    void HandleEndFrame();
     void FinalizeCurrentFrame(double FrameMilliseconds);
     void WriteSummaryIfNeeded();
 
@@ -51,8 +51,10 @@ private:
     static constexpr double SlowFrameThresholdMilliseconds = 20.0; // 50 FPS未満
     static constexpr int32 FileWriteIntervalFrames = 30;
 
-    double PreviousFrameBoundarySeconds = 0.0;
-    bool bStarted = false;
+    double FrameStartedSeconds = 0.0;
+    bool bFrameOpen = false;
+    FDelegateHandle BeginFrameHandle;
+    FDelegateHandle EndFrameHandle;
     double CurrentMilliseconds[static_cast<int32>(EAp5ProfileProcess::Count)] = {};
     FSummary Summary[static_cast<int32>(EAp5ProfileProcess::Count)];
 
