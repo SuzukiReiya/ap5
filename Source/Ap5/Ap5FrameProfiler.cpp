@@ -131,7 +131,20 @@ void FAp5FrameProfiler::AddMilliseconds(EAp5ProfileProcess Process, double Milli
 
 void FAp5FrameProfiler::FinalizeCurrentFrame(double FrameMilliseconds)
 {
-    if (FrameMilliseconds <= SlowFrameThresholdMilliseconds) return;
+    ++MeasuredFrameCount;
+    TotalFrameMilliseconds+=FrameMilliseconds;
+    MinFrameMilliseconds=FMath::Min(MinFrameMilliseconds,FrameMilliseconds);
+    MaxFrameMilliseconds=FMath::Max(MaxFrameMilliseconds,FrameMilliseconds);
+
+    if (FrameMilliseconds <= SlowFrameThresholdMilliseconds)
+    {
+        bSummaryDirty=true;
+        return;
+    }
+
+    TotalSlowFrameMilliseconds+=FrameMilliseconds;
+    MinSlowFrameMilliseconds=FMath::Min(MinSlowFrameMilliseconds,FrameMilliseconds);
+    MaxSlowFrameMilliseconds=FMath::Max(MaxSlowFrameMilliseconds,FrameMilliseconds);
 
     double MeasuredMilliseconds = 0.0;
     const int32 UnmeasuredIndex = static_cast<int32>(EAp5ProfileProcess::Unmeasured);
@@ -166,11 +179,38 @@ void FAp5FrameProfiler::WriteSummaryIfNeeded()
     }
 
     const FString Path=FPaths::Combine(FPaths::ProjectLogDir(),TEXT("Ap5SlowFrameProfile.csv"));
+    const FString SummaryPath=FPaths::Combine(FPaths::ProjectLogDir(),TEXT("Ap5FrameSummary.csv"));
     const double IoStarted=FPlatformTime::Seconds();
     const bool bSaved=FFileHelper::SaveStringToFile(Text,*Path);
+
+    const double AllAverage=MeasuredFrameCount>0
+        ? TotalFrameMilliseconds/static_cast<double>(MeasuredFrameCount) : 0.0;
+    const double SlowAverage=SlowFrameCount>0
+        ? TotalSlowFrameMilliseconds/static_cast<double>(SlowFrameCount) : 0.0;
+    const double SlowRate=MeasuredFrameCount>0
+        ? 100.0*static_cast<double>(SlowFrameCount)/static_cast<double>(MeasuredFrameCount) : 0.0;
+    const double AllMinimum=MinFrameMilliseconds==TNumericLimits<double>::Max()
+        ? 0.0 : MinFrameMilliseconds;
+    const double SlowMinimum=MinSlowFrameMilliseconds==TNumericLimits<double>::Max()
+        ? 0.0 : MinSlowFrameMilliseconds;
+
+    FString FrameSummary=TEXT("項目,値\n");
+    FrameSummary+=FString::Printf(TEXT("計測フレーム数,%llu\n"),
+        static_cast<unsigned long long>(MeasuredFrameCount));
+    FrameSummary+=FString::Printf(TEXT("低FPSフレーム数,%llu\n"),
+        static_cast<unsigned long long>(SlowFrameCount));
+    FrameSummary+=FString::Printf(TEXT("低FPS率_pct,%.3f\n"),SlowRate);
+    FrameSummary+=FString::Printf(TEXT("全フレーム平均_ms,%.3f\n"),AllAverage);
+    FrameSummary+=FString::Printf(TEXT("全フレーム最小_ms,%.3f\n"),AllMinimum);
+    FrameSummary+=FString::Printf(TEXT("全フレーム最大_ms,%.3f\n"),MaxFrameMilliseconds);
+    FrameSummary+=FString::Printf(TEXT("低FPS平均_ms,%.3f\n"),SlowAverage);
+    FrameSummary+=FString::Printf(TEXT("低FPS最小_ms,%.3f\n"),SlowMinimum);
+    FrameSummary+=FString::Printf(TEXT("低FPS最大_ms,%.3f\n"),MaxSlowFrameMilliseconds);
+    const bool bSummarySaved=FFileHelper::SaveStringToFile(FrameSummary,*SummaryPath);
+
     const double IoMilliseconds=(FPlatformTime::Seconds()-IoStarted)*1000.0;
     CurrentMilliseconds[static_cast<int32>(EAp5ProfileProcess::ProfilerIO)]+=IoMilliseconds;
-    if (bSaved) bSummaryDirty=false;
+    if (bSaved && bSummarySaved) bSummaryDirty=false;
 }
 
 FAp5ProfileScope::FAp5ProfileScope(EAp5ProfileProcess InProcess)
