@@ -142,33 +142,73 @@ public:
         return Target;
     }
 
-    // 球形弾の移動区間を9本の平行レイで近似する。
-    // Chaos用衝突箱の継ぎ目を通っても、体積データ上で弾半径内に材料があれば拾う。
+    // 球形弾は「中心点から材料までの距離 <= 弾半径」で判定する。
+    // 1フレームの移動量が弾径より大きいため、前回中心→現在中心を数点だけサンプリングし、
+    // 9本のレイスイープより安価にトンネリングも防ぐ。
     int PickSwept(const Point& Start,const Point& End,double Radius,double& Nearest,Point& Hit) const
     {
         const Point Segment=End-Start;
         const double Length=Segment.Length();
         Nearest=Length+std::max(0.0,Radius);
-        if (Length<1e-12) return -1;
+        if (Length<1e-12 || Radius<=0) return -1;
         const Point Axis=Segment*(1.0/Length);
-        const Point Reference=std::abs(Axis.Z)<0.9 ? Point(0,0,1) : Point(0,1,0);
-        const Point Side=Axis.Cross(Reference).Unit();
-        const Point Up=Side.Cross(Axis).Unit();
-        const double R=std::max(0.0,Radius)*0.75;
-        const Point Offsets[9]={
-            Point(), Side*R, Side*(-R), Up*R, Up*(-R),
-            (Side+Up).Unit()*R, (Side-Up).Unit()*R,
-            (Side*(-1.0)+Up).Unit()*R, (Side*(-1.0)-Up).Unit()*R
-        };
         int Target=-1;
-        for (int O=0;O<9;++O)
+
+        for (size_t I=0;I<Items.size();++I)
         {
-            double Distance=0;
-            const int Candidate=Pick(Start+Offsets[O],Axis,Distance);
-            if (Candidate<0 || Distance>Length+Radius || Distance>=Nearest) continue;
-            Target=Candidate;
-            Nearest=Distance;
-            Hit=Start+Offsets[O]+Axis*Distance;
+            const Piece& Candidate=Items[I];
+            const Point LocalStart=Candidate.ToLocal(Start);
+            const Point LocalEnd=Candidate.ToLocal(End);
+            if (!Candidate.Volume.SegmentIntersectsBounds(LocalStart,LocalEnd,Radius)) continue;
+
+            const double Step=std::max(0.5,
+                std::min(Radius*0.5,Candidate.Volume.GridSpacing()*0.5));
+            const int Steps=std::max(1,static_cast<int>(std::ceil(Length/Step)));
+            double PreviousT=0.0;
+            double PreviousDistance=Candidate.Volume.CollisionDistance(LocalStart)-Radius;
+            if (PreviousDistance<=0)
+            {
+                if (0.0<Nearest)
+                {
+                    Target=static_cast<int>(I);
+                    Nearest=0.0;
+                    Hit=Start+Axis*Radius;
+                }
+                continue;
+            }
+
+            for (int S=1;S<=Steps;++S)
+            {
+                const double T=static_cast<double>(S)/Steps;
+                const Point LocalPoint=LocalStart+(LocalEnd-LocalStart)*T;
+                const double Distance=Candidate.Volume.CollisionDistance(LocalPoint)-Radius;
+                if (Distance>0)
+                {
+                    PreviousT=T;
+                    PreviousDistance=Distance;
+                    continue;
+                }
+
+                // 最初の交差区間だけ数回二分し、着弾位置のずれを抑える。
+                double A=PreviousT,B=T;
+                for (int Refine=0;Refine<5;++Refine)
+                {
+                    const double Middle=(A+B)*0.5;
+                    const Point MidPoint=LocalStart+(LocalEnd-LocalStart)*Middle;
+                    if (Candidate.Volume.CollisionDistance(MidPoint)<=Radius) B=Middle;
+                    else A=Middle;
+                }
+                const double Along=B*Length;
+                if (Along<Nearest)
+                {
+                    Target=static_cast<int>(I);
+                    Nearest=Along;
+                    const Point Center=Start+Axis*Along;
+                    // 最初の接触では球の前端が表面付近にあるため、加工位置は前端で近似する。
+                    Hit=Center+Axis*Radius;
+                }
+                break;
+            }
         }
         return Target;
     }
