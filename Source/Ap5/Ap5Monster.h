@@ -49,7 +49,10 @@ private:
     void AddPart(FName Name, const FVector& Center, const FVector& Radii,
         const FRotator& Rotation = FRotator::ZeroRotator);
     UDynamicMeshComponent* CreatePiece();
+    UDynamicMeshComponent* CreateVisualChunk(UDynamicMeshComponent* Parent);
     void RebuildMesh(int32 Index);
+    void UpdateVisualChunks(int32 Index, const Ap5Volume::IndexedSurface& Surface);
+    void DestroyVisualChunks(int32 Index);
     void SyncPhysicsState();
     void RefreshPieces(const std::vector<int>& Changed);
     void UpdateArmMotion(float DeltaSeconds);
@@ -74,4 +77,11 @@ private:
 
     UPROPERTY()
     TArray<TObjectPtr<UDynamicMeshComponent>> PieceMeshes;
+
+    struct FVisualChunkState
+    {
+        UDynamicMeshComponent* Component = nullptr;
+        uint64 Signature = 0;
+    };
+    TArray<TMap<FIntVector,FVisualChunkState>> PieceVisualChunks;
 };
