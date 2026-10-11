@@ -60,6 +60,7 @@ private:
     void UpdateArmMotion(float DeltaSeconds);
     void UpdateLegMotion(float DeltaSeconds);
     bool IsDrivenFootGrounded(int32 DriveId) const;
+    void CollapseWalkingBody(int32 FailedSupportDriveId);
     double ImpactResistanceAt(const Ap5Volume::Point& LocalHit, FString& MaterialName) const;
     int32 SelectedJoinPiece = INDEX_NONE;
     int32 GrabbedPiece = INDEX_NONE;
