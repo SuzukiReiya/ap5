@@ -297,9 +297,9 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Scripts\BuildAndRun.ps
 - 集計ファイルは毎フレーム追記せず、30フレームごとを上限に `Saved/Logs/Ap5SlowFrameProfile.csv` へ**上書き**する。新しい低FPSフレームが無ければ書き込まない。
 - プロファイルファイル自身の書き込み時間も `プロファイラI/O` として計測する。
 
-現在のカテゴリは、弾生成、弾補助判定、物理状態同期、体積編集・連結判定、表面生成、DynamicMesh頂点法線初期化、DynamicMesh頂点検索・追加・法線設定、DynamicMesh三角形追加、DynamicMeshその他、Mesh反映、衝突箱生成、衝突更新、物理衝突状態設定、物理Simulation切替、物理速度復元、コンポーネント生成、プロファイラI/O、その他（未計測）です。隣接三角形の同一位置頂点は共有し、法線はNormal Overlayではなくper-vertex normalとして保持します。これにより、各三角形ごとの法線インデックス対応付けを不要にしています。
+現在のカテゴリは、弾生成、弾補助判定、物理状態同期、体積編集・連結判定、表面生成、DynamicMesh頂点法線初期化、DynamicMesh頂点追加・法線設定、DynamicMesh三角形追加、DynamicMeshその他、Mesh反映、衝突箱生成、衝突更新、物理衝突状態設定、物理Simulation切替、物理速度復元、コンポーネント生成、プロファイラI/O、その他（未計測）です。隣接三角形の共有頂点IDを体積場のMarching Tetrahedra生成時に確定し、そのIndexed SurfaceをそのままDynamicMeshへ渡します。UE側でのTMap頂点検索を廃止し、法線はper-vertex normalとして保持します。
 
-初回計測では、低FPSフレームの平均として「物理ボディ設定 約26 ms」「表面生成 約23 ms」「Dynamic Mesh構築 約16 ms」が突出し、弾生成・補助判定・体積編集は小さいことを確認しました。最適化後の再計測では、弾補助判定は約0.002 ms、物理設定系は合計約0.1 ms、表面生成は約8.3 msまで低下しました。一方でDynamicMesh構築は合計約16 ms残り、その内訳は三角形・法線対応約8.4 ms、頂点・法線検索・追加約6.0 msが支配的でした。このため、弾補助判定は中心距離方式を維持しつつ、DynamicMesh法線をNormal Overlayからper-vertex normalへ切り替えて三角形ごとの法線対応処理を削除しています。表面法線は最寄り格子点の中心差分を使用します。
+初回計測では、低FPSフレームの平均として「物理ボディ設定 約26 ms」「表面生成 約23 ms」「Dynamic Mesh構築 約16 ms」が突出し、弾生成・補助判定・体積編集は小さいことを確認しました。最適化後は弾補助判定が約0.001 ms、物理設定系が平均0.3 ms未満、表面生成が約8.1 msまで低下しました。Normal Overlayをper-vertex normalへ変更した後も、DynamicMesh頂点検索・追加・法線設定が約5.2 ms、三角形追加が約4.7 ms残りました。このため次段階では、三角形の羅列を作ってUE側で共有頂点を再検索する二重処理をやめ、体積場から共有頂点ID付きIndexed Surfaceを直接生成してDynamicMeshへ登録します。
 
 CSVは各カテゴリにつき次の3値だけを保持します。
 
