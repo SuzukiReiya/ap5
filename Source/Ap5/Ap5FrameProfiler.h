@@ -26,6 +26,12 @@ enum class EAp5ProfileProcess : uint8
     FrameLimiterWait,
     FrameLimiterOvershoot,
     Unmeasured,
+    EngineGameThreadCPU,
+    EngineGameThreadWait,
+    EngineRenderThreadCPU,
+    EngineRenderThreadWait,
+    EngineRHIThreadCPU,
+    EngineGPU,
     Count
 };
 
