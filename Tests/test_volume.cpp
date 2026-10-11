@@ -672,36 +672,70 @@ int main()
     CheckSurface(Scene.Items[Rejoined].Volume);
     std::cout << "関節動作：切りしろ無し分割・駆動中加工・切断時の拘束継承・速度継承・再接合を確認\n";
 
-    // 複数関節Pieceは駆動IDを別々に持てる。足踏み検証では左右脚を独立拘束する。
-    Ap5Volume::Ellipsoid WalkBodyShape,WalkLeftShape,WalkRightShape;
+    // 複数関節Pieceは親子関係を持てる。左右の大腿と下腿を独立IDで拘束する。
+    Ap5Volume::Ellipsoid WalkBodyShape,WalkLeftThighShape,WalkLeftLowerShape;
+    Ap5Volume::Ellipsoid WalkRightThighShape,WalkRightLowerShape;
     WalkBodyShape.Center=Point(0,0,120); WalkBodyShape.Radii=Point(35,45,60);
-    WalkLeftShape.Center=Point(0,-32,45); WalkLeftShape.Radii=Point(22,20,55);
-    WalkRightShape=WalkLeftShape; WalkRightShape.Center.Y=32;
-    Field WalkBody,WalkLeft,WalkRight;
+    WalkLeftThighShape.Center=Point(0,-32,72); WalkLeftThighShape.Radii=Point(22,20,35);
+    WalkLeftLowerShape.Center=Point(0,-32,25); WalkLeftLowerShape.Radii=Point(20,18,32);
+    WalkRightThighShape=WalkLeftThighShape; WalkRightThighShape.Center.Y=32;
+    WalkRightLowerShape=WalkLeftLowerShape; WalkRightLowerShape.Center.Y=32;
+    Field WalkBody,WalkLeftThigh,WalkLeftLower,WalkRightThigh,WalkRightLower;
     WalkBody.InitializeUnion({WalkBodyShape});
-    WalkLeft.InitializeUnion({WalkLeftShape});
-    WalkRight.InitializeUnion({WalkRightShape});
-    std::vector<Ap5Volume::DrivenPartSetup> WalkParts(2);
-    WalkParts[0].Volume=WalkLeft;
-    WalkParts[0].JointPivot=Point(0,-32,90);
-    WalkParts[0].JointAnchor=Point(0,-32,80);
+    WalkLeftThigh.InitializeUnion({WalkLeftThighShape});
+    WalkLeftLower.InitializeUnion({WalkLeftLowerShape});
+    WalkRightThigh.InitializeUnion({WalkRightThighShape});
+    WalkRightLower.InitializeUnion({WalkRightLowerShape});
+    std::vector<Ap5Volume::DrivenPartSetup> WalkParts(4);
+    WalkParts[0].Volume=WalkLeftThigh;
+    WalkParts[0].JointPivot=Point(0,-32,100);
+    WalkParts[0].JointAnchor=Point(0,-32,95);
     WalkParts[0].DriveId=1;
-    WalkParts[1].Volume=WalkRight;
-    WalkParts[1].JointPivot=Point(0,32,90);
-    WalkParts[1].JointAnchor=Point(0,32,80);
+    WalkParts[1].Volume=WalkRightThigh;
+    WalkParts[1].JointPivot=Point(0,32,100);
+    WalkParts[1].JointAnchor=Point(0,32,95);
     WalkParts[1].DriveId=2;
+    WalkParts[2].Volume=WalkLeftLower;
+    WalkParts[2].JointPivot=Point(0,-32,52);
+    WalkParts[2].JointAnchor=Point(0,-32,50);
+    WalkParts[2].ParentAnchor=Point(0,-32,50);
+    WalkParts[2].DriveId=3;
+    WalkParts[2].ParentDriveId=1;
+    WalkParts[3].Volume=WalkRightLower;
+    WalkParts[3].JointPivot=Point(0,32,52);
+    WalkParts[3].JointAnchor=Point(0,32,50);
+    WalkParts[3].ParentAnchor=Point(0,32,50);
+    WalkParts[3].DriveId=4;
+    WalkParts[3].ParentDriveId=2;
     assert(Scene.ResetDrivenParts(WalkBody,WalkParts,{Point(0,0,120)}));
-    assert(Scene.Items.size()==3);
+    assert(Scene.Items.size()==5);
     assert(Scene.Items[0].Fixed && !Scene.Items[0].Driven && Scene.Items[0].DriveId==-1);
-    int LeftDriven=0,RightDriven=0;
+    int DriveCount[5]={0,0,0,0,0};
     for (size_t I=1;I<Scene.Items.size();++I)
     {
         assert(Scene.Items[I].Driven && Scene.Items[I].Fixed);
-        if (Scene.Items[I].DriveId==1) ++LeftDriven;
-        if (Scene.Items[I].DriveId==2) ++RightDriven;
+        assert(Scene.Items[I].DriveId>=1 && Scene.Items[I].DriveId<=4);
+        ++DriveCount[Scene.Items[I].DriveId];
     }
-    assert(LeftDriven==1 && RightDriven==1);
-    std::cout << "複数関節：固定本体＋左右独立駆動Pieceと駆動IDを確認\n";
+    for (int I=1;I<=4;++I) assert(DriveCount[I]==1);
+
+    // 左大腿の膝側アンカーだけを削ると、左下腿だけが親接続を失って自由化する。
+    int LeftThighIndex=-1,LeftLowerIndex=-1,RightLowerIndex=-1;
+    for (size_t I=1;I<Scene.Items.size();++I)
+    {
+        if (Scene.Items[I].DriveId==1) LeftThighIndex=static_cast<int>(I);
+        if (Scene.Items[I].DriveId==3) LeftLowerIndex=static_cast<int>(I);
+        if (Scene.Items[I].DriveId==4) RightLowerIndex=static_cast<int>(I);
+    }
+    assert(LeftThighIndex>=0 && LeftLowerIndex>=0 && RightLowerIndex>=0);
+    assert(Scene.Items[LeftThighIndex].Volume.Blast(Point(0,-32,50),10)>0);
+    std::vector<int> ReleasedDriven;
+    assert(Scene.ReleaseOrphanedDrivenParts(ReleasedDriven)==1);
+    assert(ReleasedDriven.size()==1 && ReleasedDriven[0]==LeftLowerIndex);
+    assert(!Scene.Items[LeftLowerIndex].Driven && !Scene.Items[LeftLowerIndex].Fixed
+        && Scene.Items[LeftLowerIndex].DriveId==-1);
+    assert(Scene.Items[RightLowerIndex].Driven && Scene.Items[RightLowerIndex].DriveId==4);
+    std::cout << "複数関節：左右の股関節＋膝関節と親接続喪失時の下腿自由化を確認\n";
 
     // 爆発は球状の欠損を作り、切れた自由破片だけへ外向き速度を加える。
     Field BlastField; BlastField.Initialize(Point(45,45,45));
