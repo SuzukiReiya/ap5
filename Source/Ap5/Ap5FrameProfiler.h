@@ -69,7 +69,14 @@ private:
     double CurrentMilliseconds[static_cast<int32>(EAp5ProfileProcess::Count)] = {};
     FSummary Summary[static_cast<int32>(EAp5ProfileProcess::Count)];
 
+    uint64 MeasuredFrameCount = 0;
     uint64 SlowFrameCount = 0;
+    double TotalFrameMilliseconds = 0.0;
+    double MinFrameMilliseconds = TNumericLimits<double>::Max();
+    double MaxFrameMilliseconds = 0.0;
+    double TotalSlowFrameMilliseconds = 0.0;
+    double MinSlowFrameMilliseconds = TNumericLimits<double>::Max();
+    double MaxSlowFrameMilliseconds = 0.0;
     int32 FramesSinceWrite = 0;
     int32 WarmupFramesRemaining = WarmupFrameCount;
     bool bSummaryDirty = false;
