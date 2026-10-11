@@ -21,7 +21,7 @@ const TCHAR* ProcessNames[] =
     TEXT("DynamicMesh頂点法線初期化"),
     TEXT("DynamicMesh頂点追加・法線設定"),
     TEXT("DynamicMesh三角形追加"),
-    TEXT("DynamicMeshその他"),
+    TEXT("描画チャンク分類・署名"),
     TEXT("Mesh反映"),
     TEXT("衝突箱生成"),
     TEXT("衝突更新"),
@@ -109,6 +109,14 @@ void FAp5FrameProfiler::HandleEndFrame()
 
     const double FrameMilliseconds=
         (FPlatformTime::Seconds()-FrameStartedSeconds)*1000.0;
+
+    if (WarmupFramesRemaining>0)
+    {
+        --WarmupFramesRemaining;
+        bFrameOpen=false;
+        return;
+    }
+
     FinalizeCurrentFrame(FrameMilliseconds);
     bFrameOpen=false;
 }
