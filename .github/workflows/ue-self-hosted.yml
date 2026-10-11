@@ -1,0 +1,37 @@
+name: UE build (self-hosted)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'Source/**'
+      - 'Config/**'
+      - 'Scripts/**'
+      - 'Ap5.uproject'
+      - '.github/workflows/ue-self-hosted.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ue-build:
+    name: UE 5.6 Windows build
+    runs-on: [self-hosted, Windows, X64, ap5-ue]
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: false
+
+      - name: Ap5EditorをUE実環境でビルド
+        shell: powershell
+        run: .\Scripts\BuildAndRun.ps1 -BuildOnly
+
+      - name: 失敗時のビルドログを保存
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ap5-ue-build-log
+          path: .local/logs/build.log
+          if-no-files-found: ignore
