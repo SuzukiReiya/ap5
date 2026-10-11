@@ -27,6 +27,8 @@ struct Piece
     // 例：下腿は大腿の膝側アンカーが欠損したら自由破片へ移行する。
     int ParentDriveId=-1;
     Point JointPivot, JointAnchor, ParentAnchor;
+    // 足裏接地判定用。初期形状の最下段材料点を保持し、破壊後はVolume.Sampleで残存確認する。
+    std::vector<Point> GroundSupportPoints;
 
     Point Translation;
     Point AxisX=Point(1,0,0), AxisY=Point(0,1,0), AxisZ=Point(0,0,1);
@@ -67,6 +69,7 @@ struct DrivenPartSetup
     Point JointPivot, JointAnchor, ParentAnchor;
     int DriveId=-1;
     int ParentDriveId=-1;
+    bool GroundSupport=false;
 };
 
 class PieceCollection
@@ -160,6 +163,8 @@ public:
             Part.JointPivot=Setup.JointPivot;
             Part.JointAnchor=Setup.JointAnchor;
             Part.ParentAnchor=Setup.ParentAnchor;
+            if (Setup.GroundSupport)
+                Part.GroundSupportPoints=Part.Volume.LowestMaterialPoints();
             Items.push_back(std::move(Part));
         }
         return true;
@@ -511,6 +516,7 @@ private:
         ParentState.JointPivot=Items[Index].JointPivot;
         ParentState.JointAnchor=Items[Index].JointAnchor;
         ParentState.ParentAnchor=Items[Index].ParentAnchor;
+        ParentState.GroundSupportPoints=Items[Index].GroundSupportPoints;
         ParentState.Translation=Items[Index].Translation;
         ParentState.AxisX=Items[Index].AxisX;
         ParentState.AxisY=Items[Index].AxisY;
