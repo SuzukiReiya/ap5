@@ -139,6 +139,93 @@ public:
         return Count>0 ? Sum*(1.0/Count) : Point();
     }
 
+    // 荷重を受ける細い断面を探索する簡易構造強度モデル。
+    // smaller-side material / section material を荷重比の代理値とし、
+    // 十分な材料塊を支える断面が細くなったときだけ破断候補にする。
+    bool FindWeakSection(Point& PlanePoint,Point& PlaneNormal,
+        int& SectionSamples,int& LoadedSamples,double& LoadRatio,
+        double FailureRatio=90.0,int MinimumLoadedSamples=120) const
+    {
+        PlanePoint=Point();
+        PlaneNormal=Point();
+        SectionSamples=0;
+        LoadedSamples=0;
+        LoadRatio=0.0;
+        if (Values.empty() || FailureRatio<=0.0 || MinimumLoadedSamples<=0) return false;
+
+        int BestAxis=-1;
+        int BestSlice=-1;
+        double BestRatio=0.0;
+        int BestSection=0;
+        int BestLoad=0;
+
+        for (int Axis=0;Axis<3;++Axis)
+        {
+            const int Dimension=Axis==0 ? NX : (Axis==1 ? NY : NZ);
+            if (Dimension<5) continue;
+
+            std::vector<int> Counts(static_cast<size_t>(Dimension),0);
+            for (int Z=0;Z<NZ;++Z) for (int Y=0;Y<NY;++Y) for (int X=0;X<NX;++X)
+            {
+                if (Values[Index(X,Y,Z)]>=0) continue;
+                const int Slice=Axis==0 ? X : (Axis==1 ? Y : Z);
+                ++Counts[static_cast<size_t>(Slice)];
+            }
+
+            std::vector<int> Prefix(static_cast<size_t>(Dimension),0);
+            int Total=0;
+            for (int Slice=0;Slice<Dimension;++Slice)
+            {
+                Total+=Counts[static_cast<size_t>(Slice)];
+                Prefix[static_cast<size_t>(Slice)]=Total;
+            }
+
+            for (int Slice=1;Slice<Dimension-1;++Slice)
+            {
+                const int Section=Counts[static_cast<size_t>(Slice)];
+                if (Section<=0) continue;
+                const int Before=Prefix[static_cast<size_t>(Slice-1)];
+                const int After=Total-Prefix[static_cast<size_t>(Slice)];
+                const int Load=std::min(Before,After);
+                if (Load<MinimumLoadedSamples) continue;
+
+                const double Ratio=static_cast<double>(Load)/Section;
+                if (Ratio>BestRatio)
+                {
+                    BestRatio=Ratio;
+                    BestAxis=Axis;
+                    BestSlice=Slice;
+                    BestSection=Section;
+                    BestLoad=Load;
+                }
+            }
+        }
+
+        if (BestAxis<0 || BestRatio<FailureRatio) return false;
+
+        PlanePoint=Origin;
+        PlaneNormal=Point();
+        if (BestAxis==0)
+        {
+            PlanePoint.X=Origin.X+BestSlice*Spacing;
+            PlaneNormal=Point(1,0,0);
+        }
+        else if (BestAxis==1)
+        {
+            PlanePoint.Y=Origin.Y+BestSlice*Spacing;
+            PlaneNormal=Point(0,1,0);
+        }
+        else
+        {
+            PlanePoint.Z=Origin.Z+BestSlice*Spacing;
+            PlaneNormal=Point(0,0,1);
+        }
+        SectionSamples=BestSection;
+        LoadedSamples=BestLoad;
+        LoadRatio=BestRatio;
+        return true;
+    }
+
     // 初期形状の最下段の材料を支持点にする。今回のモデルでは足裏付近に相当する。
     std::vector<Point> LowestMaterialPoints() const
     {
