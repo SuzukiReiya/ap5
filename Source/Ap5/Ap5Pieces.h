@@ -74,6 +74,16 @@ struct DrivenPartSetup
     bool GroundSupport=false;
 };
 
+struct StructuralFailureInfo
+{
+    int PieceIndex=-1;
+    Point PlanePoint;
+    Point PlaneNormal;
+    int SectionSamples=0;
+    int LoadedSamples=0;
+    double LoadRatio=0.0;
+};
+
 class PieceCollection
 {
 public:
@@ -453,6 +463,48 @@ public:
         for (size_t I=0;I<Before;++I)
             if (Plans[I].size()>1) ApplyParts(I,Plans[I],Changed);
         return Added;
+    }
+
+    // 固定されている通常Pieceだけを対象に、自己荷重に対して細くなりすぎた
+    // 断面を平面破断させる。関節駆動Pieceは専用Constraintで扱うため除外する。
+    int BreakWeakSections(std::vector<int>& Changed,
+        std::vector<StructuralFailureInfo>& Failures,int MaximumPieces=33)
+    {
+        Changed.clear();
+        Failures.clear();
+        const int MaximumFailuresPerEdit=4;
+
+        for (int Pass=0;Pass<MaximumFailuresPerEdit;++Pass)
+        {
+            bool Broke=false;
+            const size_t Before=Items.size();
+            for (size_t I=0;I<Before;++I)
+            {
+                Piece& Candidate=Items[I];
+                if (!Candidate.Fixed || Candidate.Driven || Candidate.Volume.MaterialCount()==0)
+                    continue;
+
+                StructuralFailureInfo Info;
+                Info.PieceIndex=static_cast<int>(I);
+                if (!Candidate.Volume.FindWeakSection(
+                    Info.PlanePoint,Info.PlaneNormal,
+                    Info.SectionSamples,Info.LoadedSamples,Info.LoadRatio))
+                    continue;
+
+                std::vector<Field> Parts=
+                    Candidate.Volume.Cut(Info.PlanePoint,Info.PlaneNormal);
+                if (Parts.size()<2) continue;
+                if (Items.size()+Parts.size()-1>static_cast<size_t>(MaximumPieces))
+                    continue;
+
+                ApplyParts(I,Parts,Changed);
+                Failures.push_back(Info);
+                Broke=true;
+                break;
+            }
+            if (!Broke) break;
+        }
+        return static_cast<int>(Failures.size());
     }
 
 private:
