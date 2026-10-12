@@ -7,13 +7,14 @@
 #include "Camera/CameraActor.h"
 #include "Camera/CameraComponent.h"
 #include "Engine/World.h"
+#include "Engine/GameViewportClient.h"
 #include "InputCoreTypes.h"
 #include "Kismet/KismetSystemLibrary.h"
 
 AAp5Observer::AAp5Observer()
 {
     bAutoManageActiveCameraTarget = false;
-    bShowMouseCursor = true;
+    bShowMouseCursor = false;
 }
 
 void AAp5Observer::BeginPlay()
@@ -31,10 +32,16 @@ void AAp5Observer::BeginPlay()
     }
     ObservationCamera->GetCameraComponent()->SetFieldOfView(50.0f);
     SetViewTarget(ObservationCamera);
-    FInputModeGameAndUI Mode;
-    Mode.SetHideCursorDuringCapture(false);
-    Mode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+
+    // FPS風の相対マウス入力。カーソルは非表示・画面内に固定する。
+    FInputModeGameOnly Mode;
+    Mode.SetConsumeCaptureMouseDown(false);
     SetInputMode(Mode);
+    if (UGameViewportClient* Viewport=GetWorld()->GetGameViewport())
+    {
+        Viewport->SetMouseCaptureMode(EMouseCaptureMode::CapturePermanently_IncludingInitialMouseDown);
+        Viewport->SetMouseLockMode(EMouseLockMode::LockAlways);
+    }
     ResetView();
 }
 
@@ -46,7 +53,6 @@ void AAp5Observer::ResetView()
     const FVector InitialTarget(0.0f,0.0f,170.0f);
     const FVector InitialOffset=FRotator(Elevation,Yaw,0).Vector()*Distance;
     CameraLocation=InitialTarget+InitialOffset;
-    bDragging = false;
     UpdateView();
 }
 
@@ -62,10 +68,18 @@ void AAp5Observer::UpdateView()
     ObservationCamera->SetActorRotation(LookDirection.Rotation());
 }
 
+bool AAp5Observer::GetAimRay(FVector& Start,FVector& Direction) const
+{
+    if (!IsValid(ObservationCamera)) return false;
+    Start=ObservationCamera->GetActorLocation();
+    Direction=ObservationCamera->GetActorForwardVector().GetSafeNormal();
+    return !Direction.IsNearlyZero();
+}
+
 bool AAp5Observer::FireProjectile(bool bExplosive)
 {
     FVector Start,Direction;
-    if (!DeprojectMousePositionToWorld(Start,Direction)) return false;
+    if (!GetAimRay(Start,Direction)) return false;
     const FVector Axis=Direction.GetSafeNormal();
     if (Axis.IsNearlyZero()) return false;
 
@@ -89,24 +103,18 @@ void AAp5Observer::PlayerTick(float DeltaTime)
     {
         return;
     }
-    float MouseX = 0;
-    float MouseY = 0;
-    const bool bMouseAvailable = GetMousePosition(MouseX, MouseY);
-    if (IsInputKeyDown(EKeys::RightMouseButton) && bMouseAvailable)
+    float MouseDeltaX=0.0f;
+    float MouseDeltaY=0.0f;
+    GetInputMouseDelta(MouseDeltaX,MouseDeltaY);
+
+    // 通常時はマウス移動そのものが視点回転。切断線を描いている間だけ視点を固定する。
+    if (!bDrawingCut)
     {
-        if (bDragging)
-        {
-            Yaw += (MouseX - PreviousMouse.X) * 0.35f;
-            Elevation -= (MouseY - PreviousMouse.Y) * 0.25f;
-        }
-        PreviousMouse = FVector2D(MouseX, MouseY);
-        bDragging = true;
+        constexpr float MouseSensitivity=0.13f;
+        Yaw+=MouseDeltaX*MouseSensitivity;
+        Elevation+=MouseDeltaY*MouseSensitivity;
     }
-    else
-    {
-        bDragging = false;
-    }
-    // 右ドラッグ／矢印で向きを変え、WASDでゴーレムとは独立して移動する。
+
     const float RotationStep = 60.0f * FMath::Min(DeltaTime, 0.1f);
     if (IsInputKeyDown(EKeys::Left)) Yaw += RotationStep;
     if (IsInputKeyDown(EKeys::Right)) Yaw -= RotationStep;
@@ -229,13 +237,10 @@ void AAp5Observer::PlayerTick(float DeltaTime)
         bDrawingCut = false;
         EditStatus = TEXT("全形状を初期状態に戻しました（修復操作とは別）");
     }
-    // 案内の上と視点ドラッグ中は加工しない。
-    const bool bOverHUD = bMouseAvailable && MouseX >= 12 && MouseX <= 1012 && MouseY >= 12 && MouseY <= 146;
     FireCooldown=FMath::Max(0.0f,FireCooldown-DeltaTime);
     if (bProjectileMode || bBlastMode)
     {
-        if (IsInputKeyDown(EKeys::LeftMouseButton) && bMouseAvailable && !bDragging && !bOverHUD
-            && FireCooldown<=0.0f)
+        if (IsInputKeyDown(EKeys::LeftMouseButton) && FireCooldown<=0.0f)
         {
             const bool bExplosive=bBlastMode;
             if (FireProjectile(bExplosive))
@@ -256,13 +261,13 @@ void AAp5Observer::PlayerTick(float DeltaTime)
     if (bGrabMode)
     {
         FVector GrabStart,GrabDirection;
-        if (WasInputKeyJustPressed(EKeys::LeftMouseButton) && bMouseAvailable && !bDragging && !bOverHUD
-            && DeprojectMousePositionToWorld(GrabStart,GrabDirection))
+        if (WasInputKeyJustPressed(EKeys::LeftMouseButton)
+            && GetAimRay(GrabStart,GrabDirection))
         {
             EditStatus=TestMonster->BeginGrab(GrabStart,GrabDirection);
         }
-        if (IsInputKeyDown(EKeys::LeftMouseButton) && bMouseAvailable && !bDragging
-            && DeprojectMousePositionToWorld(GrabStart,GrabDirection))
+        if (IsInputKeyDown(EKeys::LeftMouseButton)
+            && GetAimRay(GrabStart,GrabDirection))
         {
             TestMonster->UpdateGrab(GrabStart,GrabDirection);
         }
@@ -273,57 +278,67 @@ void AAp5Observer::PlayerTick(float DeltaTime)
         }
         return;
     }
-    if (bDragging || !bMouseAvailable) bDrawingCut = false;
+
+    // 切断だけはFPS照準を起点に、押している間の相対マウス移動で2Dの切断線を描く。
     if (bDrawingCut)
     {
-        CutEnd = FVector2D(MouseX, MouseY);
+        int32 ViewX=0,ViewY=0;
+        GetViewportSize(ViewX,ViewY);
+        CutEnd.X=FMath::Clamp(CutEnd.X+MouseDeltaX,0.0f,static_cast<float>(ViewX));
+        CutEnd.Y=FMath::Clamp(CutEnd.Y+MouseDeltaY,0.0f,static_cast<float>(ViewY));
         if (WasInputKeyJustReleased(EKeys::LeftMouseButton))
         {
-            bDrawingCut = false;
-            FVector StartOrigin, StartDirection, EndOrigin, EndDirection;
-            if ((CutEnd - CutStart).Size() < 12 || bOverHUD)
+            bDrawingCut=false;
+            FVector StartOrigin,StartDirection,EndOrigin,EndDirection;
+            if ((CutEnd-CutStart).Size()<12.0f)
             {
-                EditStatus = TEXT("切断を取り消しました。案内の外で12ピクセル以上ドラッグしてください。");
+                EditStatus=TEXT("切断を取り消しました。左ボタンを押したままマウスを12px以上動かしてください。");
             }
-            else if (DeprojectScreenPositionToWorld(CutStart.X, CutStart.Y, StartOrigin, StartDirection)
-                && DeprojectScreenPositionToWorld(CutEnd.X, CutEnd.Y, EndOrigin, EndDirection))
+            else if (DeprojectScreenPositionToWorld(CutStart.X,CutStart.Y,StartOrigin,StartDirection)
+                && DeprojectScreenPositionToWorld(CutEnd.X,CutEnd.Y,EndOrigin,EndDirection))
             {
-                const FVector Normal = FVector::CrossProduct(StartDirection, EndDirection).GetSafeNormal();
-                const int32 Detached = TestMonster->Cut(ObservationCamera->GetActorLocation(), Normal);
-                if (Detached < 0) EditStatus = TEXT("破片上限32個です。Backspaceで全リセットしてください。");
-                else if (Detached == 0) EditStatus = TEXT("切断なし：本体または破片を横切る線を引いてください。");
-                else EditStatus = FString::Printf(TEXT("切断：%d個増加 / CPU処理 %.1f ms。破片も続けて加工できます。"),
-                    Detached, TestMonster->LastEditMilliseconds);
+                const FVector Normal=FVector::CrossProduct(StartDirection,EndDirection).GetSafeNormal();
+                const int32 Detached=TestMonster->Cut(ObservationCamera->GetActorLocation(),Normal);
+                if (Detached<0) EditStatus=TEXT("破片上限32個です。Backspaceで全リセットしてください。");
+                else if (Detached==0) EditStatus=TEXT("切断なし：本体または破片を横切る方向へ線を引いてください。");
+                else EditStatus=FString::Printf(
+                    TEXT("切断：%d個増加 / CPU処理 %.1f ms。破片も続けて加工できます。"),
+                    Detached,TestMonster->LastEditMilliseconds);
             }
         }
+        return;
     }
-    if (WasInputKeyJustPressed(EKeys::LeftMouseButton) && bMouseAvailable && !bDragging && !bOverHUD)
+
+    if (WasInputKeyJustPressed(EKeys::LeftMouseButton))
     {
         if (bCutMode)
         {
-            CutStart = CutEnd = FVector2D(MouseX, MouseY);
-            bDrawingCut = true;
+            int32 ViewX=0,ViewY=0;
+            GetViewportSize(ViewX,ViewY);
+            CutStart=CutEnd=FVector2D(ViewX*0.5f,ViewY*0.5f);
+            bDrawingCut=true;
             return;
         }
-        FVector Start, Direction;
-        if (DeprojectMousePositionToWorld(Start, Direction))
+
+        FVector Start,Direction;
+        if (GetAimRay(Start,Direction))
         {
             if (bJoinMode)
             {
-                EditStatus = TestMonster->ApplyJoin(Start, Direction);
+                EditStatus=TestMonster->ApplyJoin(Start,Direction);
                 return;
             }
             const int32 ChangedSamples=bImpactMode
                 ? TestMonster->ApplyImpact(Start,Direction,BrushRadius)
                 : TestMonster->ApplyBrush(Start,Direction,BrushRadius,bRepairMode);
-            if (ChangedSamples < 0) EditStatus = TEXT("分離上限のため加工しませんでした。Backspaceで全リセットできます。");
-            else if (bImpactMode) EditStatus = FString::Printf(
+            if (ChangedSamples<0) EditStatus=TEXT("分離上限のため加工しませんでした。Backspaceで全リセットできます。");
+            else if (bImpactMode) EditStatus=FString::Printf(
                 TEXT("弾痕：更新 %d 格子点 / 分離 %d 個 / CPU処理 %.1f ms / %s"),
                 ChangedSamples,TestMonster->LastSeparatedPieces,TestMonster->LastEditMilliseconds,
                 *TestMonster->GetLastImpactMaterialText());
-            else EditStatus = FString::Printf(TEXT("%s：更新 %d 格子点 / 分離 %d 個 / CPU処理 %.1f ms"),
+            else EditStatus=FString::Printf(TEXT("%s：更新 %d 格子点 / 分離 %d 個 / CPU処理 %.1f ms"),
                 bRepairMode ? TEXT("修復") : TEXT("穴あけ"),
-                ChangedSamples, TestMonster->LastSeparatedPieces, TestMonster->LastEditMilliseconds);
+                ChangedSamples,TestMonster->LastSeparatedPieces,TestMonster->LastEditMilliseconds);
         }
     }
 }
@@ -353,9 +368,16 @@ void AAp5ObserverHUD::DrawHUD()
         Observer->IsProjectileMode() ? TEXT("実体弾") : (Observer->IsGrabMode() ? TEXT("把持") : (Observer->IsBlastMode() ? TEXT("爆発弾") : (Observer->IsJoinMode() ? TEXT("接合") : (Observer->IsImpactMode() ? TEXT("弾痕") : (Observer->IsCutMode() ? TEXT("切断") : (Observer->IsRepairMode() ? TEXT("修復") : TEXT("穴あけ"))))))),
         DisplayRadius), FColor::White, 24, 20);
     DrawText(TEXT("3：細い　4：標準　5：太い　M：材質差　9：右腕関節　L：簡易歩行　Backspace：リセット"), FColor::White, 24, 44);
-    DrawText(TEXT("WASD：移動　Shift：高速　右ドラッグ／矢印：回転　ホイール／PageUp・Down：前後　R：視点を戻す"), FColor::White, 24, 68);
+    DrawText(TEXT("マウス：視点　WASD：移動　Shift：高速　ホイール／PageUp・Down：前後　R：視点を戻す"), FColor::White, 24, 68);
     DrawText(Observer->GetEditStatus(), FColor::Yellow, 24, 92);
     DrawText(TEXT("つながりを削り切ると分離・落下。本体・破片とも加工可能。修復は直近の分離・接合時の形まで。"), FColor::White, 24, 116);
+    if (Canvas != nullptr)
+    {
+        const float CenterX=Canvas->SizeX*0.5f;
+        const float CenterY=Canvas->SizeY*0.5f;
+        DrawLine(CenterX-8,CenterY,CenterX+8,CenterY,FLinearColor::White,1.5f);
+        DrawLine(CenterX,CenterY-8,CenterX,CenterY+8,FLinearColor::White,1.5f);
+    }
     FVector2D JoinMarker;
     if (Observer->GetJoinMarker(JoinMarker))
     {
