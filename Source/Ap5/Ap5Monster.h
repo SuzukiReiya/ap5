@@ -44,6 +44,8 @@ public:
     bool IsLegMotionTestEnabled() const { return bLegMotionTest; }
     bool ToggleMaterialResistanceTest();
     bool IsMaterialResistanceTestEnabled() const { return bMaterialResistanceTest; }
+    bool ToggleStructuralStrengthTest();
+    bool IsStructuralStrengthTestEnabled() const { return bStructuralStrengthTest; }
     const FString& GetLastImpactMaterialText() const { return LastImpactMaterialText; }
     double LastEditMilliseconds = 0;
     int32 LastSeparatedPieces = 0;
@@ -68,6 +70,7 @@ private:
         const FVector& JointWorld,const Ap5Volume::Point& ParentAnchor,
         const Ap5Volume::Point& ChildAnchor,float SwingLimitDegrees,float TwistLimitDegrees);
     void ValidateCollapseConstraints();
+    int32 ApplyStructuralFailures(std::vector<int>& Changed);
     double ImpactResistanceAt(const Ap5Volume::Point& LocalHit, FString& MaterialName) const;
     int32 SelectedJoinPiece = INDEX_NONE;
     int32 GrabbedPiece = INDEX_NONE;
@@ -76,6 +79,7 @@ private:
     bool bArmMotionTest = false;
     bool bLegMotionTest = false;
     bool bMaterialResistanceTest = false;
+    bool bStructuralStrengthTest = false;
     FString LastImpactMaterialText = TEXT("材質差OFF：標準 深さ8.0 cm");
     float ArmMotionTime = 0.0f;
     float LegMotionTime = 0.0f;
