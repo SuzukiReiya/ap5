@@ -247,10 +247,12 @@ void AAp5Observer::PlayerTick(float DeltaTime)
     {
         for (TActorIterator<AAp5Monster> It(GetWorld()); It; ++It)
         {
-            TestMonster = *It;
+            TestMonster=*It;
             break;
         }
     }
+    if (!IsValid(TestMonster)) return;
+
     if (WasInputKeyJustPressed(EKeys::BackSpace))
     {
         TestMonster->ResetShape();
