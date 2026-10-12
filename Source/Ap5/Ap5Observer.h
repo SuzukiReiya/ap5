@@ -55,6 +55,7 @@ private:
     float Yaw = 210.0f;
     float Elevation = 12.0f;
     float Distance = 750.0f;
+    FVector CameraLocation = FVector::ZeroVector;
     FVector2D PreviousMouse = FVector2D::ZeroVector;
     bool bDragging = false;
 };
