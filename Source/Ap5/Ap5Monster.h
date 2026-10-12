@@ -61,6 +61,7 @@ private:
     void UpdateArmMotion(float DeltaSeconds);
     void UpdateLegMotion(float DeltaSeconds);
     bool GetDrivenFootContactLocal(int32 DriveId,FVector& ContactLocal) const;
+    bool GetDrivenFootGroundContact(int32 DriveId,FVector& ContactLocal,FVector& GroundWorld) const;
     void CollapseWalkingBody(int32 FailedSupportDriveId);
     void DestroyCollapseConstraints();
     void CreateCollapseConstraint(int32 ParentIndex,int32 ChildIndex,
