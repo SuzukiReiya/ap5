@@ -3,6 +3,7 @@
 #include "Camera/CameraComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Components/SceneComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/SpringArmComponent.h"
 #include "Engine/StaticMesh.h"
@@ -14,12 +15,13 @@ AAp5PlayerCharacter::AAp5PlayerCharacter()
 
     GetCapsuleComponent()->InitCapsuleSize(42.0f,88.0f);
     bUseControllerRotationPitch=false;
-    bUseControllerRotationYaw=false;
+    // TPS照準中は移動方向ではなく、常にクロスヘア（Controller Yaw）へ正面を向ける。
+    bUseControllerRotationYaw=true;
     bUseControllerRotationRoll=false;
 
     UCharacterMovementComponent* Movement=GetCharacterMovement();
-    Movement->bOrientRotationToMovement=true;
-    Movement->RotationRate=FRotator(0.0f,540.0f,0.0f);
+    Movement->bOrientRotationToMovement=false;
+    Movement->RotationRate=FRotator(0.0f,720.0f,0.0f);
     Movement->MaxWalkSpeed=WalkSpeed;
     Movement->JumpZVelocity=470.0f;
     Movement->AirControl=0.35f;
@@ -40,46 +42,143 @@ AAp5PlayerCharacter::AAp5PlayerCharacter()
     FollowCamera->SetFieldOfView(60.0f);
 
     // Skeletal Mesh導入前の検証用表示。衝突はCharacterのCapsuleだけで受ける。
+    // 体積のある棒人間として、頭・胴・骨盤・両腕・両脚を独立した基本形状で構成する。
     static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeFinder(
         TEXT("/Engine/BasicShapes/Cube.Cube"));
     static ConstructorHelpers::FObjectFinder<UStaticMesh> SphereFinder(
         TEXT("/Engine/BasicShapes/Sphere.Sphere"));
 
-    BodyVisual=CreateDefaultSubobject<UStaticMeshComponent>(TEXT("BodyVisual"));
+    BodyVisual=CreateDefaultSubobject<UStaticMeshComponent>(TEXT("TorsoVisual"));
     BodyVisual->SetupAttachment(RootComponent);
     BodyVisual->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-    BodyVisual->SetRelativeLocation(FVector(0.0f,0.0f,0.0f));
-    BodyVisual->SetRelativeScale3D(FVector(0.36f,0.28f,0.72f));
+    BodyVisual->SetRelativeLocation(FVector(0.0f,0.0f,10.0f));
+    BodyVisual->SetRelativeScale3D(FVector(0.30f,0.22f,0.48f));
     if (CubeFinder.Succeeded()) BodyVisual->SetStaticMesh(CubeFinder.Object);
+
+    PelvisVisual=CreateDefaultSubobject<UStaticMeshComponent>(TEXT("PelvisVisual"));
+    PelvisVisual->SetupAttachment(RootComponent);
+    PelvisVisual->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    PelvisVisual->SetRelativeLocation(FVector(0.0f,0.0f,-21.0f));
+    PelvisVisual->SetRelativeScale3D(FVector(0.26f,0.20f,0.15f));
+    if (CubeFinder.Succeeded()) PelvisVisual->SetStaticMesh(CubeFinder.Object);
 
     HeadVisual=CreateDefaultSubobject<UStaticMeshComponent>(TEXT("HeadVisual"));
     HeadVisual->SetupAttachment(RootComponent);
     HeadVisual->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-    HeadVisual->SetRelativeLocation(FVector(0.0f,0.0f,62.0f));
-    HeadVisual->SetRelativeScale3D(FVector(0.24f));
+    HeadVisual->SetRelativeLocation(FVector(0.0f,0.0f,52.0f));
+    HeadVisual->SetRelativeScale3D(FVector(0.22f));
     if (SphereFinder.Succeeded()) HeadVisual->SetStaticMesh(SphereFinder.Object);
 
-    // TPS射撃の射出口を視認できるよう、右腕を前へ構えた簡易形状を置く。
-    RightArmVisual=CreateDefaultSubobject<UStaticMeshComponent>(TEXT("RightArmVisual"));
-    RightArmVisual->SetupAttachment(RootComponent);
+    LeftUpperArmVisual=CreateDefaultSubobject<UStaticMeshComponent>(TEXT("LeftUpperArmVisual"));
+    LeftUpperArmVisual->SetupAttachment(RootComponent);
+    LeftUpperArmVisual->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    LeftUpperArmVisual->SetRelativeLocation(FVector(0.0f,-27.0f,15.0f));
+    LeftUpperArmVisual->SetRelativeScale3D(FVector(0.10f,0.10f,0.30f));
+    if (CubeFinder.Succeeded()) LeftUpperArmVisual->SetStaticMesh(CubeFinder.Object);
+
+    LeftForearmVisual=CreateDefaultSubobject<UStaticMeshComponent>(TEXT("LeftForearmVisual"));
+    LeftForearmVisual->SetupAttachment(RootComponent);
+    LeftForearmVisual->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    LeftForearmVisual->SetRelativeLocation(FVector(0.0f,-27.0f,-10.0f));
+    LeftForearmVisual->SetRelativeScale3D(FVector(0.09f,0.09f,0.24f));
+    if (CubeFinder.Succeeded()) LeftForearmVisual->SetStaticMesh(CubeFinder.Object);
+
+    LeftHandVisual=CreateDefaultSubobject<UStaticMeshComponent>(TEXT("LeftHandVisual"));
+    LeftHandVisual->SetupAttachment(RootComponent);
+    LeftHandVisual->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    LeftHandVisual->SetRelativeLocation(FVector(0.0f,-27.0f,-25.0f));
+    LeftHandVisual->SetRelativeScale3D(FVector(0.10f));
+    if (SphereFinder.Succeeded()) LeftHandVisual->SetStaticMesh(SphereFinder.Object);
+
+    LeftThighVisual=CreateDefaultSubobject<UStaticMeshComponent>(TEXT("LeftThighVisual"));
+    LeftThighVisual->SetupAttachment(RootComponent);
+    LeftThighVisual->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    LeftThighVisual->SetRelativeLocation(FVector(0.0f,-11.0f,-42.0f));
+    LeftThighVisual->SetRelativeScale3D(FVector(0.13f,0.13f,0.32f));
+    if (CubeFinder.Succeeded()) LeftThighVisual->SetStaticMesh(CubeFinder.Object);
+
+    LeftShinVisual=CreateDefaultSubobject<UStaticMeshComponent>(TEXT("LeftShinVisual"));
+    LeftShinVisual->SetupAttachment(RootComponent);
+    LeftShinVisual->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    LeftShinVisual->SetRelativeLocation(FVector(0.0f,-11.0f,-70.0f));
+    LeftShinVisual->SetRelativeScale3D(FVector(0.11f,0.11f,0.27f));
+    if (CubeFinder.Succeeded()) LeftShinVisual->SetStaticMesh(CubeFinder.Object);
+
+    LeftFootVisual=CreateDefaultSubobject<UStaticMeshComponent>(TEXT("LeftFootVisual"));
+    LeftFootVisual->SetupAttachment(RootComponent);
+    LeftFootVisual->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    LeftFootVisual->SetRelativeLocation(FVector(8.0f,-11.0f,-84.0f));
+    LeftFootVisual->SetRelativeScale3D(FVector(0.26f,0.13f,0.08f));
+    if (CubeFinder.Succeeded()) LeftFootVisual->SetStaticMesh(CubeFinder.Object);
+
+    RightThighVisual=CreateDefaultSubobject<UStaticMeshComponent>(TEXT("RightThighVisual"));
+    RightThighVisual->SetupAttachment(RootComponent);
+    RightThighVisual->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    RightThighVisual->SetRelativeLocation(FVector(0.0f,11.0f,-42.0f));
+    RightThighVisual->SetRelativeScale3D(FVector(0.13f,0.13f,0.32f));
+    if (CubeFinder.Succeeded()) RightThighVisual->SetStaticMesh(CubeFinder.Object);
+
+    RightShinVisual=CreateDefaultSubobject<UStaticMeshComponent>(TEXT("RightShinVisual"));
+    RightShinVisual->SetupAttachment(RootComponent);
+    RightShinVisual->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    RightShinVisual->SetRelativeLocation(FVector(0.0f,11.0f,-70.0f));
+    RightShinVisual->SetRelativeScale3D(FVector(0.11f,0.11f,0.27f));
+    if (CubeFinder.Succeeded()) RightShinVisual->SetStaticMesh(CubeFinder.Object);
+
+    RightFootVisual=CreateDefaultSubobject<UStaticMeshComponent>(TEXT("RightFootVisual"));
+    RightFootVisual->SetupAttachment(RootComponent);
+    RightFootVisual->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    RightFootVisual->SetRelativeLocation(FVector(8.0f,11.0f,-84.0f));
+    RightFootVisual->SetRelativeScale3D(FVector(0.26f,0.13f,0.08f));
+    if (CubeFinder.Succeeded()) RightFootVisual->SetStaticMesh(CubeFinder.Object);
+
+    // 射撃側は肩をPivotにしてPitchだけ追従させる。YawはCharacter全体がControllerへ追従する。
+    WeaponPivot=CreateDefaultSubobject<USceneComponent>(TEXT("WeaponPivot"));
+    WeaponPivot->SetupAttachment(RootComponent);
+    WeaponPivot->SetRelativeLocation(FVector(0.0f,27.0f,27.0f));
+
+    RightArmVisual=CreateDefaultSubobject<UStaticMeshComponent>(TEXT("RightUpperArmVisual"));
+    RightArmVisual->SetupAttachment(WeaponPivot);
     RightArmVisual->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-    RightArmVisual->SetRelativeLocation(FVector(14.0f,34.0f,22.0f));
-    RightArmVisual->SetRelativeScale3D(FVector(0.34f,0.10f,0.10f));
+    RightArmVisual->SetRelativeLocation(FVector(13.0f,0.0f,0.0f));
+    RightArmVisual->SetRelativeScale3D(FVector(0.26f,0.10f,0.10f));
     if (CubeFinder.Succeeded()) RightArmVisual->SetStaticMesh(CubeFinder.Object);
 
+    RightForearmVisual=CreateDefaultSubobject<UStaticMeshComponent>(TEXT("RightForearmVisual"));
+    RightForearmVisual->SetupAttachment(WeaponPivot);
+    RightForearmVisual->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    RightForearmVisual->SetRelativeLocation(FVector(36.0f,0.0f,0.0f));
+    RightForearmVisual->SetRelativeScale3D(FVector(0.22f,0.09f,0.09f));
+    if (CubeFinder.Succeeded()) RightForearmVisual->SetStaticMesh(CubeFinder.Object);
+
     RightHandVisual=CreateDefaultSubobject<UStaticMeshComponent>(TEXT("RightHandVisual"));
-    RightHandVisual->SetupAttachment(RootComponent);
+    RightHandVisual->SetupAttachment(WeaponPivot);
     RightHandVisual->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-    RightHandVisual->SetRelativeLocation(FVector(34.0f,34.0f,22.0f));
+    RightHandVisual->SetRelativeLocation(FVector(50.0f,0.0f,0.0f));
     RightHandVisual->SetRelativeScale3D(FVector(0.10f));
     if (SphereFinder.Succeeded()) RightHandVisual->SetStaticMesh(SphereFinder.Object);
+
+    GunVisual=CreateDefaultSubobject<UStaticMeshComponent>(TEXT("GunVisual"));
+    GunVisual->SetupAttachment(WeaponPivot);
+    GunVisual->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    GunVisual->SetRelativeLocation(FVector(65.0f,0.0f,0.0f));
+    GunVisual->SetRelativeScale3D(FVector(0.28f,0.055f,0.055f));
+    if (CubeFinder.Succeeded()) GunVisual->SetStaticMesh(CubeFinder.Object);
 }
 
 FVector AAp5PlayerCharacter::GetProjectileMuzzleLocation() const
 {
-    if (!IsValid(RightHandVisual)) return GetActorLocation()+FVector(0.0f,0.0f,25.0f);
-    // 球形の手の少し前から生成し、弾が手の中に見えないようにする。
-    return RightHandVisual->GetComponentLocation()+GetActorForwardVector()*12.0f;
+    if (!IsValid(GunVisual))
+        return GetActorLocation()+GetActorForwardVector()*60.0f+FVector(0.0f,0.0f,25.0f);
+    // GunVisualは長さ28cmなので、その前端より少し先を射出口にする。
+    return GunVisual->GetComponentLocation()+GunVisual->GetForwardVector()*16.0f;
+}
+
+void AAp5PlayerCharacter::SetAimPitch(float PitchDegrees)
+{
+    if (!IsValid(WeaponPivot)) return;
+    WeaponPivot->SetRelativeRotation(
+        FRotator(FMath::Clamp(PitchDegrees,-65.0f,60.0f),0.0f,0.0f));
 }
 
 void AAp5PlayerCharacter::SetSprintEnabled(bool bEnabled)
