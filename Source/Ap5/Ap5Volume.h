@@ -492,6 +492,27 @@ public:
         return Sample(Q)+(P-Q).Length();
     }
 
+    // 関節など局所構造の残存量を見る。単一点Sampleより格子1点の欠損に強い。
+    int MaterialSamplesNear(const Point& Center,double Radius) const
+    {
+        if (Values.empty() || Radius<=0) return 0;
+        const int MinX=std::max(0,static_cast<int>(std::floor((Center.X-Radius-Origin.X)/Spacing)));
+        const int MinY=std::max(0,static_cast<int>(std::floor((Center.Y-Radius-Origin.Y)/Spacing)));
+        const int MinZ=std::max(0,static_cast<int>(std::floor((Center.Z-Radius-Origin.Z)/Spacing)));
+        const int MaxX=std::min(NX-1,static_cast<int>(std::ceil((Center.X+Radius-Origin.X)/Spacing)));
+        const int MaxY=std::min(NY-1,static_cast<int>(std::ceil((Center.Y+Radius-Origin.Y)/Spacing)));
+        const int MaxZ=std::min(NZ-1,static_cast<int>(std::ceil((Center.Z+Radius-Origin.Z)/Spacing)));
+        const double RadiusSquared=Radius*Radius;
+        int Count=0;
+        for (int Z=MinZ;Z<=MaxZ;++Z) for (int Y=MinY;Y<=MaxY;++Y) for (int X=MinX;X<=MaxX;++X)
+        {
+            const Point P=Position(X,Y,Z);
+            if ((P-Center).Dot(P-Center)>RadiusSquared) continue;
+            if (Values[Index(X,Y,Z)]<0) ++Count;
+        }
+        return Count;
+    }
+
     double GridSpacing() const { return Spacing; }
 
     bool SegmentIntersectsBounds(const Point& Start,const Point& End,double Margin) const
