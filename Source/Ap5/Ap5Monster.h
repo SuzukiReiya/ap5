@@ -64,7 +64,9 @@ private:
     void CollapseWalkingBody(int32 FailedSupportDriveId);
     void DestroyCollapseConstraints();
     void CreateCollapseConstraint(int32 ParentIndex,int32 ChildIndex,
-        const FVector& JointWorld,float SwingLimitDegrees,float TwistLimitDegrees);
+        const FVector& JointWorld,const Ap5Volume::Point& ParentAnchor,
+        const Ap5Volume::Point& ChildAnchor,float SwingLimitDegrees,float TwistLimitDegrees);
+    void ValidateCollapseConstraints();
     double ImpactResistanceAt(const Ap5Volume::Point& LocalHit, FString& MaterialName) const;
     int32 SelectedJoinPiece = INDEX_NONE;
     int32 GrabbedPiece = INDEX_NONE;
@@ -101,6 +103,16 @@ private:
 
     UPROPERTY()
     TArray<TObjectPtr<UPhysicsConstraintComponent>> CollapseConstraints;
+
+    struct FCollapseConstraintState
+    {
+        UPhysicsConstraintComponent* Component = nullptr;
+        UDynamicMeshComponent* Parent = nullptr;
+        UDynamicMeshComponent* Child = nullptr;
+        Ap5Volume::Point ParentAnchor;
+        Ap5Volume::Point ChildAnchor;
+    };
+    TArray<FCollapseConstraintState> CollapseConstraintStates;
 
     struct FVisualChunkState
     {
