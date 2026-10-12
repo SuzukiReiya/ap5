@@ -808,16 +808,6 @@ bool AAp5Monster::GetDrivenFootContactLocal(int32 DriveId,FVector& ContactLocal)
     return true;
 }
 
-bool AAp5Monster::IsDrivenFootGrounded(int32 DriveId) const
-{
-    constexpr double FloorZ=0.0;
-    constexpr double ContactToleranceCm=8.0;
-    FVector ContactLocal;
-    if (!GetDrivenFootContactLocal(DriveId,ContactLocal)) return false;
-    const FVector World=GetActorTransform().TransformPosition(ContactLocal);
-    return World.Z<=FloorZ+ContactToleranceCm;
-}
-
 void AAp5Monster::DestroyCollapseConstraints()
 {
     for (UPhysicsConstraintComponent* Constraint : CollapseConstraints)
@@ -1121,21 +1111,17 @@ void AAp5Monster::UpdateLegMotion(float DeltaSeconds)
     const bool bHasSupportMaterial=
         GetDrivenFootContactLocal(SupportDriveId,SupportContactLocal);
 
-    // 支持切替時は新しい足の現在位置を接地点として採用し、床面Z=0へ固定する。
+    // 支持切替時は新しい足裏材料が残っていれば接地点を採用する。
+    // 歩容上の一時的な足先高さを支持喪失とはみなさない。
     if (bSupportChanged || !bLegSupportAnchorValid)
     {
         bLegSupportAnchorValid=false;
         if (bHasSupportMaterial)
         {
-            const FVector CandidateWorld=
+            LegSupportAnchorWorld=
                 GetActorTransform().TransformPosition(SupportContactLocal);
-            constexpr float ContactAcquireToleranceCm=12.0f;
-            if (CandidateWorld.Z<=ContactAcquireToleranceCm)
-            {
-                LegSupportAnchorWorld=CandidateWorld;
-                LegSupportAnchorWorld.Z=0.0f;
-                bLegSupportAnchorValid=true;
-            }
+            LegSupportAnchorWorld.Z=0.0f;
+            bLegSupportAnchorValid=true;
         }
         ActiveSupportDriveId=SupportDriveId;
         UE_LOG(LogTemp, Display, TEXT("AP5_WALK_SUPPORT: side=%s acquired=%d"),
@@ -1150,9 +1136,17 @@ void AAp5Monster::UpdateLegMotion(float DeltaSeconds)
         const FVector RotatedContact=
             LegMotionOriginTransform.TransformVectorNoScale(SupportContactLocal);
         FVector DesiredLocation=LegSupportAnchorWorld-RotatedContact;
-        // 支持足固定は水平成分だけに使う。脚関節の上下運動をActor全体のZへ
-        // 反映すると、歩行中に胴体全体が毎フレーム上下してガタつく。
-        DesiredLocation.Z=LegMotionOriginTransform.GetLocation().Z;
+
+        // 支持脚から得られる上下運動は残すが、そのまま100%反映すると
+        // 股関節角と支持切替で大きく跳ねる。開始高さとの差を30%に縮め、
+        // さらに指数補間して数cm程度の滑らかな上下動にする。
+        const float OriginZ=LegMotionOriginTransform.GetLocation().Z;
+        const float RawVerticalOffset=DesiredLocation.Z-OriginZ;
+        const float VerticalTarget=OriginZ
+            +FMath::Clamp(RawVerticalOffset*0.30f,-4.0f,4.0f);
+        const float VerticalAlpha=1.0f-FMath::Exp(-SafeDelta*7.0f);
+        DesiredLocation.Z=FMath::Lerp(
+            PreviousActorLocation.Z,VerticalTarget,VerticalAlpha);
         WalkTransform.SetLocation(DesiredLocation);
         SetActorTransform(WalkTransform,false,nullptr,ETeleportType::TeleportPhysics);
 
@@ -1183,8 +1177,9 @@ void AAp5Monster::UpdateLegMotion(float DeltaSeconds)
             LocalTransform*GetActorTransform(),false,nullptr,ETeleportType::TeleportPhysics);
     }
 
-    const bool bSupportGrounded=bLegSupportAnchorValid
-        && bHasSupportMaterial && IsDrivenFootGrounded(SupportDriveId);
+    // 支持足の破壊だけを支持喪失として扱う。関節運動による数cmの上下は
+    // 歩行そのものなので、床Zとの瞬間距離では転倒判定しない。
+    const bool bSupportGrounded=bLegSupportAnchorValid && bHasSupportMaterial;
     if (bSupportGrounded) LegSupportLossSeconds=0.0f;
     else LegSupportLossSeconds+=SafeDelta;
 
