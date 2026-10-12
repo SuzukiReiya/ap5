@@ -112,7 +112,8 @@ void AAp5Observer::PlayerTick(float DeltaTime)
     {
         constexpr float MouseSensitivity=0.35f;
         Yaw+=MouseDeltaX*MouseSensitivity;
-        Elevation-=MouseDeltaY*MouseSensitivity;
+        // GetInputMouseDeltaのY符号に合わせ、実機で「上へ動かすと上を見る」向きにする。
+        Elevation+=MouseDeltaY*MouseSensitivity;
     }
 
     const float RotationStep=60.0f*FMath::Min(DeltaTime,0.1f);
