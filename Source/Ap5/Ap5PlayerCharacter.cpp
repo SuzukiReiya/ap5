@@ -43,7 +43,7 @@ AAp5PlayerCharacter::AAp5PlayerCharacter()
 
     // Skeletal Mesh導入前の検証用表示。衝突はCharacterのCapsuleだけで受ける。
     // 6頭身寄りのデフォルメ体型として、頭・胴・骨盤・両腕・両脚を
-    // 太めの楕円体で構成する。関節部は意図的に少し重ね、隙間を見せない。銃だけは直方体を使う.
+    // 太めの楕円体で構成する。関節部は意図的に少し重ね、隙間を見せない。銃だけは直方体を使う。
     static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeFinder(
         TEXT("/Engine/BasicShapes/Cube.Cube"));
     static ConstructorHelpers::FObjectFinder<UStaticMesh> SphereFinder(
@@ -171,7 +171,7 @@ FVector AAp5PlayerCharacter::GetProjectileMuzzleLocation() const
 {
     if (!IsValid(GunVisual))
         return GetActorLocation()+GetActorForwardVector()*60.0f+FVector(0.0f,0.0f,25.0f);
-    // GunVisualは長さ28cmなので、その前端より少し先を射出口にする。
+    // GunVisualは長さ30cmなので、その前端より少し先を射出口にする。
     return GunVisual->GetComponentLocation()+GunVisual->GetForwardVector()*16.0f;
 }
 
