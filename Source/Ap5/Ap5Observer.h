@@ -5,7 +5,7 @@
 #include "GameFramework/HUD.h"
 #include "Ap5Observer.generated.h"
 
-class ACameraActor;
+class AAp5PlayerCharacter;
 class AAp5Monster;
 class AAp5Projectile;
 
@@ -33,11 +33,10 @@ public:
     const FString& GetEditStatus() const { return EditStatus; }
 private:
     void ResetView();
-    void UpdateView();
     bool GetAimRay(FVector& Start,FVector& Direction) const;
     bool FireProjectile(bool bExplosive);
     UPROPERTY()
-    TObjectPtr<ACameraActor> ObservationCamera;
+    TObjectPtr<AAp5PlayerCharacter> PlayerCharacter;
     UPROPERTY()
     TObjectPtr<AAp5Monster> TestMonster;
     bool bJoinMode = false;
@@ -53,10 +52,6 @@ private:
     float BrushRadius = 20.0f;
     float FireCooldown = 0.0f;
     FString EditStatus = TEXT("画面中央の照準を体に合わせて左クリックしてください");
-    // FPSカメラの実視線角。ElevationはUEのPitchとして直接使う。
-    float Yaw = 30.0f;
-    float Elevation = -12.0f;
-    FVector CameraLocation = FVector::ZeroVector;
 };
 
 UCLASS()
