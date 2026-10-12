@@ -7,6 +7,7 @@
 #include "Camera/CameraActor.h"
 #include "Camera/CameraComponent.h"
 #include "Engine/World.h"
+#include "Engine/Canvas.h"
 #include "Engine/GameViewportClient.h"
 #include "InputCoreTypes.h"
 #include "Kismet/KismetSystemLibrary.h"
