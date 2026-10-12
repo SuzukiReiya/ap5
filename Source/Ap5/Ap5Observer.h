@@ -30,9 +30,13 @@ public:
     FVector2D GetCutStart() const { return CutStart; }
     FVector2D GetCutEnd() const { return CutEnd; }
     float GetBrushRadius() const { return BrushRadius; }
+    int32 GetSelectedHotbarIndex() const { return SelectedHotbarIndex; }
+    int32 GetHotbarCount() const { return 8; }
+    FString GetSelectedToolName() const;
     const FString& GetEditStatus() const { return EditStatus; }
 private:
     void ResetView();
+    void SelectHotbarIndex(int32 Index);
     bool GetAimRay(FVector& Start,FVector& Direction) const;
     bool FireProjectile(bool bExplosive);
     UPROPERTY()
@@ -42,16 +46,17 @@ private:
     bool bJoinMode = false;
     bool bBlastMode = false;
     bool bGrabMode = false;
-    bool bProjectileMode = false;
-    bool bImpactMode = true;
+    bool bProjectileMode = true;
+    bool bImpactMode = false;
     bool bRepairMode = false;
     bool bCutMode = false;
     bool bDrawingCut = false;
     FVector2D CutStart = FVector2D::ZeroVector;
     FVector2D CutEnd = FVector2D::ZeroVector;
-    float BrushRadius = 20.0f;
+    float BrushRadius = 12.0f;
     float FireCooldown = 0.0f;
-    FString EditStatus = TEXT("画面中央の照準を体に合わせて左クリックしてください");
+    int32 SelectedHotbarIndex = 0;
+    FString EditStatus = TEXT("ハンドガン：左クリック長押しで射撃");
 };
 
 UCLASS()
