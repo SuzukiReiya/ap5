@@ -348,6 +348,7 @@ void AAp5Monster::RefreshPieces(const std::vector<int>& Changed)
         PieceVisualChunks.AddDefaulted();
     }
     for (int32 Index : Changed) RebuildMesh(Index);
+    ValidateCollapseConstraints();
     SetActorTickEnabled(true);
 }
 
@@ -695,6 +696,7 @@ FString AAp5Monster::ApplyJoin(const FVector& Start, const FVector& Direction)
     PieceMeshes.RemoveAt(Source);
     ClearJoinSelection();
     RebuildMesh(Result);
+    ValidateCollapseConstraints();
     SetActorTickEnabled(true);
     LastEditMilliseconds = (FPlatformTime::Seconds() - Started) * 1000;
     UE_LOG(LogTemp, Display, TEXT("AP5_JOIN: source=%d target=%d result=%d total=%d cpu_ms=%.2f"),
@@ -809,10 +811,12 @@ void AAp5Monster::DestroyCollapseConstraints()
     for (UPhysicsConstraintComponent* Constraint : CollapseConstraints)
         if (IsValid(Constraint)) Constraint->DestroyComponent();
     CollapseConstraints.Empty();
+    CollapseConstraintStates.Empty();
 }
 
 void AAp5Monster::CreateCollapseConstraint(
     int32 ParentIndex,int32 ChildIndex,const FVector& JointWorld,
+    const Ap5Volume::Point& ParentAnchor,const Ap5Volume::Point& ChildAnchor,
     float SwingLimitDegrees,float TwistLimitDegrees)
 {
     if (!PieceMeshes.IsValidIndex(ParentIndex) || !PieceMeshes.IsValidIndex(ChildIndex)) return;
@@ -828,7 +832,6 @@ void AAp5Monster::CreateCollapseConstraint(
     Constraint->SetWorldLocation(JointWorld);
     Constraint->SetDisableCollision(true);
 
-    // 関節位置は固定し、角度だけを制限付きで許容する簡易ラグドール。
     Constraint->SetLinearXLimit(LCM_Locked,0.0f);
     Constraint->SetLinearYLimit(LCM_Locked,0.0f);
     Constraint->SetLinearZLimit(LCM_Locked,0.0f);
@@ -838,6 +841,49 @@ void AAp5Monster::CreateCollapseConstraint(
     Constraint->RegisterComponent();
     Constraint->SetConstrainedComponents(Parent,NAME_None,Child,NAME_None);
     CollapseConstraints.Add(Constraint);
+
+    FCollapseConstraintState State;
+    State.Component=Constraint;
+    State.Parent=Parent;
+    State.Child=Child;
+    State.ParentAnchor=ParentAnchor;
+    State.ChildAnchor=ChildAnchor;
+    CollapseConstraintStates.Add(State);
+}
+
+void AAp5Monster::ValidateCollapseConstraints()
+{
+    for (int32 I=CollapseConstraintStates.Num()-1;I>=0;--I)
+    {
+        FCollapseConstraintState& State=CollapseConstraintStates[I];
+        const int32 ParentIndex=PieceMeshes.IndexOfByKey(State.Parent);
+        const int32 ChildIndex=PieceMeshes.IndexOfByKey(State.Child);
+        bool bKeep=ParentIndex!=INDEX_NONE && ChildIndex!=INDEX_NONE
+            && ParentIndex<static_cast<int32>(Pieces.Items.size())
+            && ChildIndex<static_cast<int32>(Pieces.Items.size());
+
+        if (bKeep)
+        {
+            const bool bParentMaterial=
+                Pieces.Items[ParentIndex].Volume.Sample(State.ParentAnchor)<0;
+            const bool bChildMaterial=
+                Pieces.Items[ChildIndex].Volume.Sample(State.ChildAnchor)<0;
+            bKeep=bParentMaterial && bChildMaterial;
+        }
+
+        if (bKeep) continue;
+
+        if (IsValid(State.Component))
+        {
+            State.Component->BreakConstraint();
+            CollapseConstraints.Remove(State.Component);
+            State.Component->DestroyComponent();
+        }
+        UE_LOG(LogTemp, Display,
+            TEXT("AP5_RAGDOLL_JOINT_BROKEN: parent=%d child=%d"),
+            ParentIndex,ChildIndex);
+        CollapseConstraintStates.RemoveAt(I);
+    }
 }
 
 void AAp5Monster::CollapseWalkingBody(int32 FailedSupportDriveId)
@@ -900,10 +946,18 @@ void AAp5Monster::CollapseWalkingBody(int32 FailedSupportDriveId)
 
     // Chaosへ移した後に股関節・膝関節をConstraintで接続する。
     // 破壊済みで対応Pieceが存在しない関節は作らない。
-    CreateCollapseConstraint(BodyIndex,LeftThighIndex,LeftHipWorld,55.0f,35.0f);
-    CreateCollapseConstraint(BodyIndex,RightThighIndex,RightHipWorld,55.0f,35.0f);
-    CreateCollapseConstraint(LeftThighIndex,LeftLowerIndex,LeftKneeWorld,45.0f,20.0f);
-    CreateCollapseConstraint(RightThighIndex,RightLowerIndex,RightKneeWorld,45.0f,20.0f);
+    CreateCollapseConstraint(
+        BodyIndex,LeftThighIndex,LeftHipWorld,
+        Ap5Volume::Point(0,-34,112),Ap5Volume::Point(0,-34,112),55.0f,35.0f);
+    CreateCollapseConstraint(
+        BodyIndex,RightThighIndex,RightHipWorld,
+        Ap5Volume::Point(0,34,112),Ap5Volume::Point(0,34,112),55.0f,35.0f);
+    CreateCollapseConstraint(
+        LeftThighIndex,LeftLowerIndex,LeftKneeWorld,
+        Ap5Volume::Point(0,-34,66),Ap5Volume::Point(0,-36,66),45.0f,20.0f);
+    CreateCollapseConstraint(
+        RightThighIndex,RightLowerIndex,RightKneeWorld,
+        Ap5Volume::Point(0,34,66),Ap5Volume::Point(0,36,66),45.0f,20.0f);
 
     UE_LOG(LogTemp, Display,
         TEXT("AP5_WALK_COLLAPSE: failed_support=%s pieces=%d constraints=%d distance_cm=%.1f"),
