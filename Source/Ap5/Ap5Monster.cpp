@@ -12,6 +12,7 @@
 #include "PhysicsEngine/PhysicsHandleComponent.h"
 #include "PhysicsEngine/PhysicsConstraintComponent.h"
 #include "Math/RotationMatrix.h"
+#include "Engine/World.h"
 #include "UObject/ConstructorHelpers.h"
 
 namespace
@@ -808,6 +809,49 @@ bool AAp5Monster::GetDrivenFootContactLocal(int32 DriveId,FVector& ContactLocal)
     return true;
 }
 
+bool AAp5Monster::GetDrivenFootGroundContact(
+    int32 DriveId,FVector& ContactLocal,FVector& GroundWorld) const
+{
+    UWorld* World=GetWorld();
+    if (World==nullptr) return false;
+
+    FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(Ap5FootGround),false,this);
+    QueryParams.AddIgnoredActor(this);
+
+    constexpr float TraceStartHeightCm=10.0f;
+    constexpr float TraceDepthCm=30.0f;
+    FVector LocalSum=FVector::ZeroVector;
+    FVector GroundSum=FVector::ZeroVector;
+    int32 HitCount=0;
+
+    for (const Ap5Volume::Piece& State : Pieces.Items)
+    {
+        if (!State.Driven || State.DriveId!=DriveId) continue;
+        for (const Ap5Volume::Point& Support : State.GroundSupportPoints)
+        {
+            if (State.Volume.Sample(Support)>=0) continue;
+
+            const FVector Local=EnginePoint(State.ToWorld(Support));
+            const FVector FootWorld=GetActorTransform().TransformPosition(Local);
+            const FVector TraceStart=FootWorld+FVector(0,0,TraceStartHeightCm);
+            const FVector TraceEnd=FootWorld-FVector(0,0,TraceDepthCm);
+            FHitResult Hit;
+            if (!World->LineTraceSingleByChannel(
+                Hit,TraceStart,TraceEnd,ECC_WorldStatic,QueryParams))
+                continue;
+
+            LocalSum+=Local;
+            GroundSum+=Hit.ImpactPoint;
+            ++HitCount;
+        }
+    }
+
+    if (HitCount<=0) return false;
+    ContactLocal=LocalSum/static_cast<float>(HitCount);
+    GroundWorld=GroundSum/static_cast<float>(HitCount);
+    return true;
+}
+
 void AAp5Monster::DestroyCollapseConstraints()
 {
     for (UPhysicsConstraintComponent* Constraint : CollapseConstraints)
@@ -1114,23 +1158,28 @@ void AAp5Monster::UpdateLegMotion(float DeltaSeconds)
     FVector SupportContactLocal;
     const bool bHasSupportMaterial=
         GetDrivenFootContactLocal(SupportDriveId,SupportContactLocal);
+    FVector GroundContactLocal;
+    FVector GroundContactWorld;
+    const bool bHasGround=bHasSupportMaterial
+        && GetDrivenFootGroundContact(
+            SupportDriveId,GroundContactLocal,GroundContactWorld);
 
-    // 支持切替時は新しい足裏材料が残っていれば接地点を採用する。
-    // 歩容上の一時的な足先高さを支持喪失とはみなさない。
+    // 支持切替時は足裏の下向きTraceが実際のWorldStatic床へ当たった場合だけ接地を取得する。
+    // これにより床端の外へ踏み出した足は空中支持にならない。
     if (bSupportChanged || !bLegSupportAnchorValid)
     {
         bLegSupportAnchorValid=false;
-        if (bHasSupportMaterial)
+        if (bHasGround)
         {
-            LegSupportAnchorWorld=
-                GetActorTransform().TransformPosition(SupportContactLocal);
-            LegSupportAnchorWorld.Z=0.0f;
+            SupportContactLocal=GroundContactLocal;
+            LegSupportAnchorWorld=GroundContactWorld;
             bLegSupportAnchorValid=true;
         }
         ActiveSupportDriveId=SupportDriveId;
-        UE_LOG(LogTemp, Display, TEXT("AP5_WALK_SUPPORT: side=%s acquired=%d"),
+        UE_LOG(LogTemp, Display,
+            TEXT("AP5_WALK_SUPPORT: side=%s acquired=%d ground=%d"),
             SupportDriveId==3 ? TEXT("left") : TEXT("right"),
-            bLegSupportAnchorValid ? 1 : 0);
+            bLegSupportAnchorValid ? 1 : 0,bHasGround ? 1 : 0);
     }
 
     const FVector PreviousActorLocation=GetActorLocation();
@@ -1181,9 +1230,10 @@ void AAp5Monster::UpdateLegMotion(float DeltaSeconds)
             LocalTransform*GetActorTransform(),false,nullptr,ETeleportType::TeleportPhysics);
     }
 
-    // 支持足の破壊だけを支持喪失として扱う。関節運動による数cmの上下は
-    // 歩行そのものなので、床Zとの瞬間距離では転倒判定しない。
-    const bool bSupportGrounded=bLegSupportAnchorValid && bHasSupportMaterial;
+    // 足裏材料が残っていても、その下に床がなければ支持喪失。
+    // 30cm以内のWorldStaticへの下向きTraceで実接地を継続確認する。
+    const bool bSupportGrounded=bLegSupportAnchorValid
+        && bHasSupportMaterial && bHasGround;
     if (bSupportGrounded) LegSupportLossSeconds=0.0f;
     else LegSupportLossSeconds+=SafeDelta;
 
