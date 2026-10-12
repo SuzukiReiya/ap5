@@ -692,7 +692,7 @@ FString AAp5Monster::ApplyJoin(const FVector& Start, const FVector& Direction)
     {
         if (Pieces.Items[Target].Fixed) return TEXT("まず、分離して落ちた破片を選んでください。");
         SelectedJoinPiece = Target;
-        return TEXT("破片を選択しました。次に接合先をクリック。同じ破片または8で選択解除。");
+        return TEXT("破片を選択しました。次に接合先をクリック。同じ破片または別装備への切替で選択解除。");
     }
     if (Target == SelectedJoinPiece)
     {
@@ -712,7 +712,7 @@ FString AAp5Monster::ApplyJoin(const FVector& Start, const FVector& Direction)
         UE_LOG(LogTemp, Display, TEXT("AP5_JOIN_REJECTED: source=%d target=%d reason=%d"), Source, Target, Result);
         if (Result == -2) return TEXT("共通の分離元がないため接合できません。別の接合先を選んでください。");
         if (Result == -3) return TEXT("元の位置でもつながりません。間の破片を先に戻すか、別の接合先を選んでください。");
-        return TEXT("接合対象が無効です。8で選択を解除してください。");
+        return TEXT("接合対象が無効です。別装備へ切り替えて選択を解除してください。");
     }
     // データの番号とコンポーネントの番号をそろえ、吸収した破片の物理ボディを除去する。
     DestroyVisualChunks(Source);
