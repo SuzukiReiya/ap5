@@ -53,9 +53,9 @@ private:
     float BrushRadius = 20.0f;
     float FireCooldown = 0.0f;
     FString EditStatus = TEXT("画面中央の照準を体に合わせて左クリックしてください");
-    float Yaw = 210.0f;
-    float Elevation = 12.0f;
-    float Distance = 750.0f;
+    // FPSカメラの実視線角。ElevationはUEのPitchとして直接使う。
+    float Yaw = 30.0f;
+    float Elevation = -12.0f;
     FVector CameraLocation = FVector::ZeroVector;
 };
 
