@@ -1,6 +1,7 @@
 #include "Ap5GameMode.h"
 #include "Ap5Monster.h"
 #include "Ap5Observer.h"
+#include "Ap5PlayerCharacter.h"
 
 #include "Components/DirectionalLightComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -8,6 +9,7 @@
 #include "Engine/StaticMesh.h"
 #include "Engine/StaticMeshActor.h"
 #include "Engine/World.h"
+#include "GameFramework/PlayerController.h"
 #include "Materials/MaterialInterface.h"
 #include "UObject/ConstructorHelpers.h"
 
@@ -53,11 +55,18 @@ void AAp5GameMode::StartPlay()
     AStaticMeshActor* Floor = World->SpawnActor<AStaticMeshActor>(
         FVector(0.0, 0.0, -10.0), FRotator::ZeroRotator);
     AAp5Monster* Monster = World->SpawnActor<AAp5Monster>();
+
+    FActorSpawnParameters PlayerSpawn;
+    PlayerSpawn.SpawnCollisionHandlingOverride=
+        ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+    AAp5PlayerCharacter* Player=World->SpawnActor<AAp5PlayerCharacter>(
+        FVector(-520.0,-260.0,90.0),FRotator(0.0,27.0,0.0),PlayerSpawn);
+
     ADirectionalLight* KeyLight = World->SpawnActor<ADirectionalLight>(
         FVector::ZeroVector, FRotator(-50.0, -30.0, 0.0));
     ADirectionalLight* FillLight = World->SpawnActor<ADirectionalLight>(
         FVector::ZeroVector, FRotator(-25.0, 140.0, 0.0));
-    if (Floor == nullptr || Monster == nullptr ||
+    if (Floor == nullptr || Monster == nullptr || Player == nullptr ||
         KeyLight == nullptr || FillLight == nullptr)
     {
         UE_LOG(LogAp5, Error, TEXT("Cannot create sample actors."));
@@ -72,6 +81,19 @@ void AAp5GameMode::StartPlay()
     // 歩行支持はECC_WorldStaticへの下向きTraceで検出する。
     FloorComponent->SetCollisionObjectType(ECC_WorldStatic);
 
+    // PlayerControllerは既存の破壊・射撃入力を持ち、PawnだけTPS Characterへ切り替える。
+    if (APlayerController* Controller=World->GetFirstPlayerController())
+    {
+        Controller->Possess(Player);
+        const FVector AimTarget=Monster->GetActorLocation()+FVector(0.0,0.0,180.0);
+        Controller->SetControlRotation(
+            (AimTarget-Player->GetActorLocation()).Rotation());
+    }
+    else
+    {
+        UE_LOG(LogAp5, Error, TEXT("TPS player controller was not found."));
+    }
+
     UDirectionalLightComponent* KeyComponent = CastChecked<UDirectionalLightComponent>(KeyLight->GetLightComponent());
     KeyComponent->SetMobility(EComponentMobility::Movable);
     KeyComponent->SetIntensity(3.0f);
@@ -82,5 +104,5 @@ void AAp5GameMode::StartPlay()
     FillComponent->SetIntensity(0.8f);
     FillComponent->SetCastShadows(false);
 
-    UE_LOG(LogAp5, Display, TEXT("AP5_SAMPLE_READY: monster observation scene created."));
+    UE_LOG(LogAp5, Display, TEXT("AP5_SAMPLE_READY: TPS player and monster scene created."));
 }
