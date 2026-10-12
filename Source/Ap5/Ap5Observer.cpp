@@ -110,10 +110,11 @@ void AAp5Observer::PlayerTick(float DeltaTime)
     // 通常時はマウス移動そのものが視点回転。上へ動かせば上を見る通常のFPS向き。
     if (!bDrawingCut)
     {
-        constexpr float MouseSensitivity=0.35f;
-        Yaw+=MouseDeltaX*MouseSensitivity;
-        // GetInputMouseDeltaのY符号に合わせ、実機で「上へ動かすと上を見る」向きにする。
-        Elevation+=MouseDeltaY*MouseSensitivity;
+        constexpr float MouseSensitivityX=0.65f;
+        constexpr float MouseSensitivityY=0.35f;
+        Yaw+=MouseDeltaX*MouseSensitivityX;
+        // 上下感度は維持し、左右だけ高速化する。
+        Elevation+=MouseDeltaY*MouseSensitivityY;
     }
 
     const float RotationStep=60.0f*FMath::Min(DeltaTime,0.1f);
