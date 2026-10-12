@@ -92,9 +92,40 @@ function Invoke-Ap5Tool {
 
 function Build-Ap5Editor {
     param([string]$EngineRoot)
-    Invoke-Ap5Tool -FilePath (Join-Path $EngineRoot 'Engine\Build\BatchFiles\Build.bat') `
-        -Arguments @('Ap5Editor', 'Win64', 'Development', "-Project=$script:ProjectFile", '-WaitMutex', '-NoHotReloadFromIDE') `
-        -LogName 'build.log'
+
+    # self-hosted runner(NetworkService)と対話ユーザーが同じPCで同時にUBTを起動すると、
+    # Global\\UnrealBuildTool_Mutex_* のACLが異なるため -WaitMutex でも待機できず
+    # UnauthorizedAccessException になる。これだけはビルド失敗ではなく競合として再試行する。
+    $maximumWaitSeconds = 300
+    $retryIntervalSeconds = 10
+    $elapsedSeconds = 0
+    while ($true) {
+        try {
+            Invoke-Ap5Tool -FilePath (Join-Path $EngineRoot 'Engine\Build\BatchFiles\Build.bat') `
+                -Arguments @('Ap5Editor', 'Win64', 'Development', "-Project=$script:ProjectFile", '-WaitMutex', '-NoHotReloadFromIDE') `
+                -LogName 'build.log'
+            return
+        }
+        catch {
+            $logPath = Join-Path $script:LocalDirectory 'logs\build.log'
+            $isMutexAccessConflict = $false
+            if (Test-Path $logPath) {
+                $buildLog = Get-Content $logPath -Raw
+                $isMutexAccessConflict =
+                    $buildLog -match 'UnauthorizedAccessException' -and
+                    $buildLog -match 'UnrealBuildTool_Mutex_'
+            }
+            if (-not $isMutexAccessConflict -or $elapsedSeconds -ge $maximumWaitSeconds) {
+                throw
+            }
+
+            Write-Host ("UBT is being used by another Windows account on this PC. " +
+                "Waiting {0}s and retrying... ({1}/{2}s)" -f
+                $retryIntervalSeconds,$elapsedSeconds,$maximumWaitSeconds) -ForegroundColor Yellow
+            Start-Sleep -Seconds $retryIntervalSeconds
+            $elapsedSeconds += $retryIntervalSeconds
+        }
+    }
 }
 
 function Initialize-Ap5Map {
