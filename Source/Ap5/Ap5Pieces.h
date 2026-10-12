@@ -26,6 +26,8 @@ struct Piece
     // ParentDriveId>=0 の部位は親側の ParentAnchor が残っている間だけ拘束される。
     // 例：下腿は大腿の膝側アンカーが欠損したら自由破片へ移行する。
     int ParentDriveId=-1;
+    // 駆動解除後も元の部位を識別するID。分離した子にも継承し、物理関節の付け替えに使う。
+    int StructureId=-1;
     Point JointPivot, JointAnchor, ParentAnchor;
     // 足裏接地判定用。初期形状の最下段材料点を保持し、破壊後はVolume.Sampleで残存確認する。
     std::vector<Point> GroundSupportPoints;
@@ -142,6 +144,7 @@ public:
 
         Piece Root;
         Root.Volume=Body;
+        Root.StructureId=0;
         Root.Fixed=HasSupport(Root.Volume);
         if (!Root.Fixed) return false;
         Items.push_back(std::move(Root));
@@ -159,6 +162,7 @@ public:
             Part.Driven=true;
             Part.DriveId=Setup.DriveId;
             Part.ParentDriveId=Setup.ParentDriveId;
+            Part.StructureId=Setup.DriveId;
             Part.Fixed=true;
             Part.JointPivot=Setup.JointPivot;
             Part.JointAnchor=Setup.JointAnchor;
@@ -530,6 +534,7 @@ private:
         ParentState.Driven=Items[Index].Driven;
         ParentState.DriveId=Items[Index].DriveId;
         ParentState.ParentDriveId=Items[Index].ParentDriveId;
+        ParentState.StructureId=Items[Index].StructureId;
         ParentState.JointPivot=Items[Index].JointPivot;
         ParentState.JointAnchor=Items[Index].JointAnchor;
         ParentState.ParentAnchor=Items[Index].ParentAnchor;
@@ -545,6 +550,7 @@ private:
         Items[Index].Driven=ParentState.Driven && Items[Index].Volume.Sample(ParentState.JointAnchor)<0;
         Items[Index].DriveId=Items[Index].Driven ? ParentState.DriveId : -1;
         Items[Index].ParentDriveId=Items[Index].Driven ? ParentState.ParentDriveId : -1;
+        Items[Index].StructureId=ParentState.StructureId;
         Items[Index].JointPivot=ParentState.JointPivot;
         Items[Index].ParentAnchor=ParentState.ParentAnchor;
         Items[Index].JointAnchor=ParentState.JointAnchor;
