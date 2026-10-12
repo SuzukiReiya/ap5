@@ -156,6 +156,49 @@ int main()
     Arm.InitializeUnion(Shapes);
     assert(Arm.Components().size()==2);
     std::cout << "切断：水平・垂直・斜め・穴のある断面・連結判定の検証成功\n";
+    // 構造強度：太い接続は保持し、まだトポロジ的にはつながっている細い接続を
+    // smaller-side load / section の簡易荷重比で破断候補にする。
+    std::vector<Ap5Volume::Ellipsoid> StrengthShapes;
+    Ap5Volume::Ellipsoid StrengthLeft;
+    StrengthLeft.Center=Point(0,-55,0);
+    StrengthLeft.Radii=Point(35,35,35);
+    StrengthShapes.push_back(StrengthLeft);
+    Ap5Volume::Ellipsoid StrengthRight=StrengthLeft;
+    StrengthRight.Center=Point(0,55,0);
+    StrengthShapes.push_back(StrengthRight);
+    Ap5Volume::Ellipsoid StrengthBridge=StrengthLeft;
+    StrengthBridge.Center=Point(0,0,0);
+    StrengthBridge.Radii=Point(20,45,20);
+    StrengthShapes.push_back(StrengthBridge);
+
+    Field StrengthField;
+    StrengthField.InitializeUnion(StrengthShapes);
+    Point WeakPlane,WeakNormal;
+    int SectionSamples=0,LoadedSamples=0;
+    double LoadRatio=0.0;
+    assert(!StrengthField.FindWeakSection(
+        WeakPlane,WeakNormal,SectionSamples,LoadedSamples,LoadRatio));
+    assert(StrengthField.Brush(Point(-100,0,0),Point(1,0,0),10,false)>0);
+    assert(StrengthField.Components().size()==1);
+    assert(StrengthField.FindWeakSection(
+        WeakPlane,WeakNormal,SectionSamples,LoadedSamples,LoadRatio));
+    assert(SectionSamples>0 && LoadedSamples>=120 && LoadRatio>=90.0);
+
+    Ap5Volume::PieceCollection StrengthScene;
+    StrengthScene.Reset(StrengthField,{Point(0,-55,0)});
+    std::vector<int> StrengthChanged;
+    std::vector<Ap5Volume::StructuralFailureInfo> StrengthFailures;
+    assert(StrengthScene.BreakWeakSections(StrengthChanged,StrengthFailures)==1);
+    assert(StrengthScene.Items.size()>=2);
+    assert(StrengthFailures.size()==1);
+    bool HasFixedStrengthPart=false,HasFreeStrengthPart=false;
+    for (const Ap5Volume::Piece& P : StrengthScene.Items)
+    {
+        HasFixedStrengthPart=HasFixedStrengthPart || P.Fixed;
+        HasFreeStrengthPart=HasFreeStrengthPart || !P.Fixed;
+    }
+    assert(HasFixedStrengthPart && HasFreeStrengthPart);
+    std::cout << "構造強度：細い接続部を自己荷重比で破断する検証成功\n";
     Ap5Volume::FallState Falling;
     Falling.MinimumZ=100;
     assert(!Falling.Advance(0,0));
