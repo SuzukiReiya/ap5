@@ -60,6 +60,7 @@ private:
     void RefreshPieces(const std::vector<int>& Changed);
     void UpdateArmMotion(float DeltaSeconds);
     void UpdateLegMotion(float DeltaSeconds);
+    bool GetDrivenFootContactLocal(int32 DriveId,FVector& ContactLocal) const;
     bool IsDrivenFootGrounded(int32 DriveId) const;
     void CollapseWalkingBody(int32 FailedSupportDriveId);
     void DestroyCollapseConstraints();
@@ -82,6 +83,9 @@ private:
     bool bLegWalkBlocked = false;
     int32 ActiveSupportDriveId = INDEX_NONE;
     float LegSupportLossSeconds = 0.0f;
+    bool bLegSupportAnchorValid = false;
+    FVector LegSupportAnchorWorld = FVector::ZeroVector;
+    FVector LegWalkVelocityWorld = FVector::ZeroVector;
     FTransform LegMotionOriginTransform = FTransform::Identity;
     std::vector<Ap5Volume::Ellipsoid> Shapes;
     std::vector<Ap5Volume::Ellipsoid> BodyShapes;
