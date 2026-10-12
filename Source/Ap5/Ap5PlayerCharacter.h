@@ -17,6 +17,7 @@ public:
     AAp5PlayerCharacter();
 
     UCameraComponent* GetFollowCamera() const { return FollowCamera; }
+    FVector GetProjectileMuzzleLocation() const;
     void SetSprintEnabled(bool bEnabled);
     void AdjustCameraDistance(float DeltaCm);
     void ResetCameraDistance();
@@ -33,6 +34,12 @@ private:
 
     UPROPERTY()
     TObjectPtr<UStaticMeshComponent> HeadVisual;
+
+    UPROPERTY()
+    TObjectPtr<UStaticMeshComponent> RightArmVisual;
+
+    UPROPERTY()
+    TObjectPtr<UStaticMeshComponent> RightHandVisual;
 
     float WalkSpeed = 450.0f;
     float SprintSpeed = 750.0f;
