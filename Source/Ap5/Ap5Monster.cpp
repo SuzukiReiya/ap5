@@ -846,32 +846,78 @@ void AAp5Monster::CreateCollapseConstraint(
     State.Component=Constraint;
     State.Parent=Parent;
     State.Child=Child;
+    State.ParentStructureId=Pieces.Items[ParentIndex].StructureId;
+    State.ChildStructureId=Pieces.Items[ChildIndex].StructureId;
     State.ParentAnchor=ParentAnchor;
     State.ChildAnchor=ChildAnchor;
+    constexpr double JointCheckRadiusCm=15.0;
+    State.ParentInitialMaterialSamples=
+        Pieces.Items[ParentIndex].Volume.MaterialSamplesNear(ParentAnchor,JointCheckRadiusCm);
+    State.ChildInitialMaterialSamples=
+        Pieces.Items[ChildIndex].Volume.MaterialSamplesNear(ChildAnchor,JointCheckRadiusCm);
     CollapseConstraintStates.Add(State);
 }
 
 void AAp5Monster::ValidateCollapseConstraints()
 {
+    constexpr double JointCheckRadiusCm=15.0;
     for (int32 I=CollapseConstraintStates.Num()-1;I>=0;--I)
     {
         FCollapseConstraintState& State=CollapseConstraintStates[I];
-        const int32 ParentIndex=PieceMeshes.IndexOfByKey(State.Parent);
-        const int32 ChildIndex=PieceMeshes.IndexOfByKey(State.Child);
-        bool bKeep=ParentIndex!=INDEX_NONE && ChildIndex!=INDEX_NONE
-            && ParentIndex<static_cast<int32>(Pieces.Items.size())
-            && ChildIndex<static_cast<int32>(Pieces.Items.size());
+
+        // RebuildMeshでChaos Bodyが作り直されるため、元Componentポインタだけを信用しない。
+        // 同じStructureIdを継承した破片のうち、関節周辺材料を最も多く保持するものへ付け替える。
+        int32 ParentIndex=INDEX_NONE;
+        int32 ChildIndex=INDEX_NONE;
+        int32 ParentSamples=0;
+        int32 ChildSamples=0;
+        for (int32 PieceIndex=0;PieceIndex<static_cast<int32>(Pieces.Items.size());++PieceIndex)
+        {
+            const Ap5Volume::Piece& P=Pieces.Items[PieceIndex];
+            if (P.StructureId==State.ParentStructureId)
+            {
+                const int32 Samples=P.Volume.MaterialSamplesNear(
+                    State.ParentAnchor,JointCheckRadiusCm);
+                if (Samples>ParentSamples) { ParentSamples=Samples; ParentIndex=PieceIndex; }
+            }
+            if (P.StructureId==State.ChildStructureId)
+            {
+                const int32 Samples=P.Volume.MaterialSamplesNear(
+                    State.ChildAnchor,JointCheckRadiusCm);
+                if (Samples>ChildSamples) { ChildSamples=Samples; ChildIndex=PieceIndex; }
+            }
+        }
+
+        // 単一格子点ではなく、初期関節断面の25%以上が残る間は関節を維持する。
+        const int32 ParentMinimum=FMath::Max(3,
+            FMath::CeilToInt(State.ParentInitialMaterialSamples*0.25f));
+        const int32 ChildMinimum=FMath::Max(3,
+            FMath::CeilToInt(State.ChildInitialMaterialSamples*0.25f));
+        const bool bKeep=PieceMeshes.IsValidIndex(ParentIndex)
+            && PieceMeshes.IsValidIndex(ChildIndex)
+            && ParentSamples>=ParentMinimum && ChildSamples>=ChildMinimum;
 
         if (bKeep)
         {
-            const bool bParentMaterial=
-                Pieces.Items[ParentIndex].Volume.Sample(State.ParentAnchor)<0;
-            const bool bChildMaterial=
-                Pieces.Items[ChildIndex].Volume.Sample(State.ChildAnchor)<0;
-            bKeep=bParentMaterial && bChildMaterial;
-        }
+            UDynamicMeshComponent* Parent=PieceMeshes[ParentIndex];
+            UDynamicMeshComponent* Child=PieceMeshes[ChildIndex];
+            State.Parent=Parent;
+            State.Child=Child;
 
-        if (bKeep) continue;
+            // Collision再構築でPhysicsBodyインスタンスが更新されるため、毎回Constraintを再バインドする。
+            if (IsValid(State.Component)
+                && Parent->IsSimulatingPhysics() && Child->IsSimulatingPhysics())
+            {
+                const FVector ParentJoint=GetActorTransform().TransformPosition(
+                    EnginePoint(Pieces.Items[ParentIndex].ToWorld(State.ParentAnchor)));
+                const FVector ChildJoint=GetActorTransform().TransformPosition(
+                    EnginePoint(Pieces.Items[ChildIndex].ToWorld(State.ChildAnchor)));
+                State.Component->SetWorldLocation((ParentJoint+ChildJoint)*0.5f);
+                State.Component->SetConstrainedComponents(
+                    Parent,NAME_None,Child,NAME_None);
+            }
+            continue;
+        }
 
         if (IsValid(State.Component))
         {
@@ -880,8 +926,9 @@ void AAp5Monster::ValidateCollapseConstraints()
             State.Component->DestroyComponent();
         }
         UE_LOG(LogTemp, Display,
-            TEXT("AP5_RAGDOLL_JOINT_BROKEN: parent=%d child=%d"),
-            ParentIndex,ChildIndex);
+            TEXT("AP5_RAGDOLL_JOINT_BROKEN: parentPart=%d childPart=%d parentSamples=%d/%d childSamples=%d/%d"),
+            State.ParentStructureId,State.ChildStructureId,
+            ParentSamples,ParentMinimum,ChildSamples,ChildMinimum);
         CollapseConstraintStates.RemoveAt(I);
     }
 }
