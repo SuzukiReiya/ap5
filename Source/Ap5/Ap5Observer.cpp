@@ -43,6 +43,9 @@ void AAp5Observer::ResetView()
     Yaw = 210.0f;
     Elevation = 12.0f;
     Distance = 750.0f;
+    const FVector InitialTarget(0.0f,0.0f,170.0f);
+    const FVector InitialOffset=FRotator(Elevation,Yaw,0).Vector()*Distance;
+    CameraLocation=InitialTarget+InitialOffset;
     bDragging = false;
     UpdateView();
 }
@@ -53,12 +56,10 @@ void AAp5Observer::UpdateView()
     {
         return;
     }
-    const FVector Target=IsValid(TestMonster)
-        ? TestMonster->GetActorLocation()+FVector(0,0,170)
-        : FVector(0,0,170);
-    const FVector Offset = FRotator(Elevation, Yaw, 0).Vector() * Distance;
-    ObservationCamera->SetActorLocation(Target + Offset);
-    ObservationCamera->SetActorRotation((-Offset).Rotation());
+    // ゴーレム位置には追従しない。Yaw/Elevationは視線方向だけを表す。
+    const FVector LookDirection=-FRotator(Elevation,Yaw,0).Vector();
+    ObservationCamera->SetActorLocation(CameraLocation);
+    ObservationCamera->SetActorRotation(LookDirection.Rotation());
 }
 
 bool AAp5Observer::FireProjectile(bool bExplosive)
@@ -105,19 +106,40 @@ void AAp5Observer::PlayerTick(float DeltaTime)
     {
         bDragging = false;
     }
-    // マウス操作が難しい環境でも同じ確認ができるようにする。
-    const float Step = 60.0f * FMath::Min(DeltaTime, 0.1f);
-    if (IsInputKeyDown(EKeys::Left)) Yaw += Step;
-    if (IsInputKeyDown(EKeys::Right)) Yaw -= Step;
-    if (IsInputKeyDown(EKeys::Up)) Elevation -= Step;
-    if (IsInputKeyDown(EKeys::Down)) Elevation += Step;
-    if (WasInputKeyJustPressed(EKeys::MouseScrollUp)) Distance -= 50;
-    if (WasInputKeyJustPressed(EKeys::MouseScrollDown)) Distance += 50;
-    if (IsInputKeyDown(EKeys::PageUp)) Distance -= Step * 5;
-    if (IsInputKeyDown(EKeys::PageDown)) Distance += Step * 5;
-    Elevation = FMath::Clamp(Elevation, 0.0f, 75.0f);
-    Distance = FMath::Clamp(Distance, 400.0f, 1400.0f);
+    // 右ドラッグ／矢印で向きを変え、WASDでゴーレムとは独立して移動する。
+    const float RotationStep = 60.0f * FMath::Min(DeltaTime, 0.1f);
+    if (IsInputKeyDown(EKeys::Left)) Yaw += RotationStep;
+    if (IsInputKeyDown(EKeys::Right)) Yaw -= RotationStep;
+    if (IsInputKeyDown(EKeys::Up)) Elevation -= RotationStep;
+    if (IsInputKeyDown(EKeys::Down)) Elevation += RotationStep;
+    Elevation = FMath::Clamp(Elevation, -75.0f, 75.0f);
     Yaw = FMath::UnwindDegrees(Yaw);
+
+    const FVector ViewForward=-FRotator(Elevation,Yaw,0).Vector();
+    const FVector HorizontalForward=
+        FVector(ViewForward.X,ViewForward.Y,0.0f).GetSafeNormal();
+    const FVector HorizontalRight=
+        FVector::CrossProduct(FVector::UpVector,HorizontalForward).GetSafeNormal();
+    const bool bFast=IsInputKeyDown(EKeys::LeftShift) || IsInputKeyDown(EKeys::RightShift);
+    const float MoveSpeed=bFast ? 1200.0f : 450.0f;
+    FVector Move=FVector::ZeroVector;
+    if (IsInputKeyDown(EKeys::W)) Move+=HorizontalForward;
+    if (IsInputKeyDown(EKeys::S)) Move-=HorizontalForward;
+    if (IsInputKeyDown(EKeys::A)) Move-=HorizontalRight;
+    if (IsInputKeyDown(EKeys::D)) Move+=HorizontalRight;
+    if (!Move.IsNearlyZero())
+        CameraLocation+=Move.GetSafeNormal()*MoveSpeed*FMath::Min(DeltaTime,0.1f);
+
+    // 従来のズーム操作は自由カメラの前後移動として残す。
+    const float ForwardStep=80.0f;
+    if (WasInputKeyJustPressed(EKeys::MouseScrollUp))
+        CameraLocation+=ViewForward*ForwardStep;
+    if (WasInputKeyJustPressed(EKeys::MouseScrollDown))
+        CameraLocation-=ViewForward*ForwardStep;
+    if (IsInputKeyDown(EKeys::PageUp))
+        CameraLocation+=ViewForward*MoveSpeed*FMath::Min(DeltaTime,0.1f);
+    if (IsInputKeyDown(EKeys::PageDown))
+        CameraLocation-=ViewForward*MoveSpeed*FMath::Min(DeltaTime,0.1f);
     if (WasInputKeyJustPressed(EKeys::R)) ResetView();
     if (WasInputKeyJustPressed(EKeys::Escape))
     {
@@ -331,7 +353,7 @@ void AAp5ObserverHUD::DrawHUD()
         Observer->IsProjectileMode() ? TEXT("実体弾") : (Observer->IsGrabMode() ? TEXT("把持") : (Observer->IsBlastMode() ? TEXT("爆発弾") : (Observer->IsJoinMode() ? TEXT("接合") : (Observer->IsImpactMode() ? TEXT("弾痕") : (Observer->IsCutMode() ? TEXT("切断") : (Observer->IsRepairMode() ? TEXT("修復") : TEXT("穴あけ"))))))),
         DisplayRadius), FColor::White, 24, 20);
     DrawText(TEXT("3：細い　4：標準　5：太い　M：材質差　9：右腕関節　L：簡易歩行　Backspace：リセット"), FColor::White, 24, 44);
-    DrawText(TEXT("右ドラッグ／矢印：回転　ホイール／PageUp・Down：ズーム　R：視点を戻す　Esc：終了"), FColor::White, 24, 68);
+    DrawText(TEXT("WASD：移動　Shift：高速　右ドラッグ／矢印：回転　ホイール／PageUp・Down：前後　R：視点を戻す"), FColor::White, 24, 68);
     DrawText(Observer->GetEditStatus(), FColor::Yellow, 24, 92);
     DrawText(TEXT("つながりを削り切ると分離・落下。本体・破片とも加工可能。修復は直近の分離・接合時の形まで。"), FColor::White, 24, 116);
     FVector2D JoinMarker;
