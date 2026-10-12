@@ -53,16 +53,34 @@ bool AAp5Observer::GetAimRay(FVector& Start,FVector& Direction) const
 
 bool AAp5Observer::FireProjectile(bool bExplosive)
 {
-    FVector Start,Direction;
-    if (!GetAimRay(Start,Direction)) return false;
-    const FVector Axis=Direction.GetSafeNormal();
+    FVector CameraStart,CameraDirection;
+    if (!GetAimRay(CameraStart,CameraDirection) || !IsValid(PlayerCharacter))
+        return false;
+
+    // まず画面中央クロスヘアの照準点をカメラから求める。
+    // 弾そのものは右手から照準点へ向けて発射するため、肩越し視点でも狙いと弾道が一致する。
+    constexpr float AimDistanceCm=10000.0f;
+    FVector AimPoint=CameraStart+CameraDirection*AimDistanceCm;
+    FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(Ap5TPSAim),false,PlayerCharacter);
+    QueryParams.AddIgnoredActor(PlayerCharacter);
+    FHitResult AimHit;
+    if (GetWorld()->LineTraceSingleByChannel(
+        AimHit,CameraStart,AimPoint,ECC_Visibility,QueryParams))
+    {
+        AimPoint=AimHit.ImpactPoint;
+    }
+
+    const FVector Muzzle=PlayerCharacter->GetProjectileMuzzleLocation();
+    const FVector Axis=(AimPoint-Muzzle).GetSafeNormal();
     if (Axis.IsNearlyZero()) return false;
 
     FAp5ProfileScope Profile(EAp5ProfileProcess::ProjectileSpawn);
     FActorSpawnParameters Parameters;
+    Parameters.Owner=PlayerCharacter;
+    Parameters.Instigator=PlayerCharacter;
     Parameters.SpawnCollisionHandlingOverride=ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
     AAp5Projectile* Projectile=GetWorld()->SpawnActor<AAp5Projectile>(
-        Start+Axis*30.0f,Axis.Rotation(),Parameters);
+        Muzzle,Axis.Rotation(),Parameters);
     if (Projectile==nullptr) return false;
 
     Projectile->Launch(Axis,BrushRadius,bExplosive,BrushRadius*1.5f);
@@ -152,7 +170,7 @@ void AAp5Observer::PlayerTick(float DeltaTime)
         bProjectileMode=true; bGrabMode=false; bBlastMode=false; bJoinMode=false;
         bImpactMode=false; bRepairMode=false; bCutMode=false; bDrawingCut=false;
         FireCooldown=0.0f;
-        EditStatus=TEXT("実体弾：左ボタン長押しで連射。飛翔後に衝突して弾痕と運動量を与えます。");
+        EditStatus=TEXT("実体弾：右手から中央クロスヘアへ発射。左ボタン長押しで連射します。");
     }
     if (WasInputKeyJustPressed(EKeys::G))
     {
@@ -163,7 +181,7 @@ void AAp5Observer::PlayerTick(float DeltaTime)
     {
         bProjectileMode=false; bGrabMode=false; bBlastMode=true; bJoinMode=false; bImpactMode=false; bRepairMode=false; bCutMode=false; bDrawingCut=false;
         FireCooldown=0.0f;
-        EditStatus=TEXT("爆発弾：左ボタン長押しで連射。実体弾の着弾地点で球状破壊します。");
+        EditStatus=TEXT("爆発弾：右手から中央クロスヘアへ発射。着弾地点で球状破壊します。");
     }
     if (WasInputKeyJustPressed(EKeys::One)) { bProjectileMode = false; bGrabMode = false; bBlastMode = false; bJoinMode = false; bImpactMode = false; bRepairMode = false; bCutMode = false; bDrawingCut = false; }
     if (WasInputKeyJustPressed(EKeys::Two)) { bProjectileMode = false; bGrabMode = false; bBlastMode = false; bJoinMode = false; bImpactMode = false; bRepairMode = true; bCutMode = false; bDrawingCut = false; }
@@ -367,8 +385,26 @@ void AAp5ObserverHUD::DrawHUD()
     {
         const float CenterX=Canvas->SizeX*0.5f;
         const float CenterY=Canvas->SizeY*0.5f;
-        DrawLine(CenterX-8,CenterY,CenterX+8,CenterY,FLinearColor::White,1.5f);
-        DrawLine(CenterX,CenterY-8,CenterX,CenterY+8,FLinearColor::White,1.5f);
+
+        // 肩越しTPSでも狙い位置が明確になる常時クロスヘア。
+        // 黒い太線を下地にしてから白線を重ね、明るい背景でも見失いにくくする。
+        const float Gap=5.0f;
+        const float Length=10.0f;
+        const float OuterThickness=3.5f;
+        const float InnerThickness=1.5f;
+        const FLinearColor Outline(0.0f,0.0f,0.0f,0.85f);
+        const FLinearColor Foreground=FLinearColor::White;
+
+        DrawLine(CenterX-Gap-Length,CenterY,CenterX-Gap,CenterY,Outline,OuterThickness);
+        DrawLine(CenterX+Gap,CenterY,CenterX+Gap+Length,CenterY,Outline,OuterThickness);
+        DrawLine(CenterX,CenterY-Gap-Length,CenterX,CenterY-Gap,Outline,OuterThickness);
+        DrawLine(CenterX,CenterY+Gap,CenterX,CenterY+Gap+Length,Outline,OuterThickness);
+
+        DrawLine(CenterX-Gap-Length,CenterY,CenterX-Gap,CenterY,Foreground,InnerThickness);
+        DrawLine(CenterX+Gap,CenterY,CenterX+Gap+Length,CenterY,Foreground,InnerThickness);
+        DrawLine(CenterX,CenterY-Gap-Length,CenterX,CenterY-Gap,Foreground,InnerThickness);
+        DrawLine(CenterX,CenterY+Gap,CenterX,CenterY+Gap+Length,Foreground,InnerThickness);
+        DrawRect(FLinearColor::White,CenterX-1.0f,CenterY-1.0f,2.0f,2.0f);
     }
     FVector2D JoinMarker;
     if (Observer->GetJoinMarker(JoinMarker))
