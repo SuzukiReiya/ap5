@@ -38,14 +38,6 @@ public:
     void UpdateGrab(const FVector& Start, const FVector& Direction);
     void EndGrab();
     bool GetGrabLocation(FVector& Location) const;
-    bool ToggleArmMotionTest();
-    bool IsArmMotionTestEnabled() const { return bArmMotionTest; }
-    bool ToggleLegMotionTest();
-    bool IsLegMotionTestEnabled() const { return bLegMotionTest; }
-    bool ToggleMaterialResistanceTest();
-    bool IsMaterialResistanceTestEnabled() const { return bMaterialResistanceTest; }
-    bool ToggleStructuralStrengthTest();
-    bool IsStructuralStrengthTestEnabled() const { return bStructuralStrengthTest; }
     const FString& GetLastImpactMaterialText() const { return LastImpactMaterialText; }
     double LastEditMilliseconds = 0;
     int32 LastSeparatedPieces = 0;
@@ -76,11 +68,12 @@ private:
     int32 GrabbedPiece = INDEX_NONE;
     float GrabDistance = 0.0f;
     FVector GrabTarget = FVector::ZeroVector;
-    bool bArmMotionTest = false;
-    bool bLegMotionTest = false;
-    bool bMaterialResistanceTest = false;
-    bool bStructuralStrengthTest = false;
-    FString LastImpactMaterialText = TEXT("材質差OFF：標準 深さ8.0 cm");
+    // モンスター固有の物理・関節特性はゲーム中常時有効。検証用ON/OFFキーは持たせない。
+    bool bArmMotionTest = true;
+    bool bLegMotionTest = true;
+    bool bMaterialResistanceTest = true;
+    bool bStructuralStrengthTest = true;
+    FString LastImpactMaterialText = TEXT("材質差ON：腕・脚=標準 / 胴体=x2 / 頭=x4");
     float ArmMotionTime = 0.0f;
     float LegMotionTime = 0.0f;
     float LegWalkDistance = 0.0f;
@@ -93,6 +86,7 @@ private:
     FTransform LegMotionOriginTransform = FTransform::Identity;
     std::vector<Ap5Volume::Ellipsoid> Shapes;
     std::vector<Ap5Volume::Ellipsoid> BodyShapes;
+    std::vector<Ap5Volume::Ellipsoid> RightArmShapes;
     std::vector<Ap5Volume::Ellipsoid> LeftThighShapes;
     std::vector<Ap5Volume::Ellipsoid> LeftLowerLegShapes;
     std::vector<Ap5Volume::Ellipsoid> RightThighShapes;
