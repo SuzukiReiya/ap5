@@ -58,6 +58,28 @@ AAp5PlayerCharacter::AAp5PlayerCharacter()
     HeadVisual->SetRelativeLocation(FVector(0.0f,0.0f,62.0f));
     HeadVisual->SetRelativeScale3D(FVector(0.24f));
     if (SphereFinder.Succeeded()) HeadVisual->SetStaticMesh(SphereFinder.Object);
+
+    // TPS射撃の射出口を視認できるよう、右腕を前へ構えた簡易形状を置く。
+    RightArmVisual=CreateDefaultSubobject<UStaticMeshComponent>(TEXT("RightArmVisual"));
+    RightArmVisual->SetupAttachment(RootComponent);
+    RightArmVisual->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    RightArmVisual->SetRelativeLocation(FVector(14.0f,34.0f,22.0f));
+    RightArmVisual->SetRelativeScale3D(FVector(0.34f,0.10f,0.10f));
+    if (CubeFinder.Succeeded()) RightArmVisual->SetStaticMesh(CubeFinder.Object);
+
+    RightHandVisual=CreateDefaultSubobject<UStaticMeshComponent>(TEXT("RightHandVisual"));
+    RightHandVisual->SetupAttachment(RootComponent);
+    RightHandVisual->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    RightHandVisual->SetRelativeLocation(FVector(34.0f,34.0f,22.0f));
+    RightHandVisual->SetRelativeScale3D(FVector(0.10f));
+    if (SphereFinder.Succeeded()) RightHandVisual->SetStaticMesh(SphereFinder.Object);
+}
+
+FVector AAp5PlayerCharacter::GetProjectileMuzzleLocation() const
+{
+    if (!IsValid(RightHandVisual)) return GetActorLocation()+FVector(0.0f,0.0f,25.0f);
+    // 球形の手の少し前から生成し、弾が手の中に見えないようにする。
+    return RightHandVisual->GetComponentLocation()+GetActorForwardVector()*12.0f;
 }
 
 void AAp5PlayerCharacter::SetSprintEnabled(bool bEnabled)
