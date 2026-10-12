@@ -69,6 +69,8 @@ void AAp5GameMode::StartPlay()
     FloorComponent->SetStaticMesh(FloorMesh);
     FloorComponent->SetWorldScale3D(FVector(12.0, 12.0, 0.2));
     FloorComponent->SetCollisionProfileName(TEXT("BlockAll"));
+    // 歩行支持はECC_WorldStaticへの下向きTraceで検出する。
+    FloorComponent->SetCollisionObjectType(ECC_WorldStatic);
 
     UDirectionalLightComponent* KeyComponent = CastChecked<UDirectionalLightComponent>(KeyLight->GetLightComponent());
     KeyComponent->SetMobility(EComponentMobility::Movable);
