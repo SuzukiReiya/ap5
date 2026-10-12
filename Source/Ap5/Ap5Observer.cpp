@@ -2,9 +2,9 @@
 #include "Ap5FrameProfiler.h"
 #include "Ap5Monster.h"
 #include "Ap5Projectile.h"
+#include "Ap5PlayerCharacter.h"
 #include "EngineUtils.h"
 
-#include "Camera/CameraActor.h"
 #include "Camera/CameraComponent.h"
 #include "Engine/World.h"
 #include "Engine/Canvas.h"
@@ -14,27 +14,16 @@
 
 AAp5Observer::AAp5Observer()
 {
-    bAutoManageActiveCameraTarget = false;
-    bShowMouseCursor = false;
+    bAutoManageActiveCameraTarget=true;
+    bShowMouseCursor=false;
 }
 
 void AAp5Observer::BeginPlay()
 {
     Super::BeginPlay();
-    if (!IsLocalController())
-    {
-        return;
-    }
-    ObservationCamera = GetWorld()->SpawnActor<ACameraActor>();
-    if (ObservationCamera == nullptr)
-    {
-        UE_LOG(LogTemp, Error, TEXT("AP5_CAMERA_FAILED"));
-        return;
-    }
-    ObservationCamera->GetCameraComponent()->SetFieldOfView(50.0f);
-    SetViewTarget(ObservationCamera);
+    if (!IsLocalController()) return;
 
-    // FPS風の相対マウス入力。カーソルは非表示・画面内に固定する。
+    // TPSでも相対マウス入力を使う。Camera自体はCharacterのSpringArm配下。
     FInputModeGameOnly Mode;
     Mode.SetConsumeCaptureMouseDown(false);
     SetInputMode(Mode);
@@ -43,36 +32,22 @@ void AAp5Observer::BeginPlay()
         Viewport->SetMouseCaptureMode(EMouseCaptureMode::CapturePermanently_IncludingInitialMouseDown);
         Viewport->SetMouseLockMode(EMouseLockMode::LockAlways);
     }
-    ResetView();
 }
 
 void AAp5Observer::ResetView()
 {
-    Yaw=30.0f;
-    Elevation=-12.0f;
-    constexpr float InitialDistance=750.0f;
-    const FVector InitialTarget(0.0f,0.0f,170.0f);
-    const FVector LookDirection=FRotator(Elevation,Yaw,0).Vector();
-    CameraLocation=InitialTarget-LookDirection*InitialDistance;
-    UpdateView();
-}
-
-void AAp5Observer::UpdateView()
-{
-    if (ObservationCamera == nullptr)
-    {
-        return;
-    }
-    // FPSカメラとしてPitch/Yawをそのまま視線角に使う。
-    ObservationCamera->SetActorLocation(CameraLocation);
-    ObservationCamera->SetActorRotation(FRotator(Elevation,Yaw,0.0f));
+    if (!IsValid(PlayerCharacter)) return;
+    const float BodyYaw=PlayerCharacter->GetActorRotation().Yaw;
+    SetControlRotation(FRotator(-8.0f,BodyYaw,0.0f));
+    PlayerCharacter->ResetCameraDistance();
 }
 
 bool AAp5Observer::GetAimRay(FVector& Start,FVector& Direction) const
 {
-    if (!IsValid(ObservationCamera)) return false;
-    Start=ObservationCamera->GetActorLocation();
-    Direction=ObservationCamera->GetActorForwardVector().GetSafeNormal();
+    if (!IsValid(PlayerCharacter) || !IsValid(PlayerCharacter->GetFollowCamera()))
+        return false;
+    Start=PlayerCharacter->GetFollowCamera()->GetComponentLocation();
+    Direction=PlayerCharacter->GetFollowCamera()->GetForwardVector().GetSafeNormal();
     return !Direction.IsNearlyZero();
 }
 
@@ -99,68 +74,71 @@ void AAp5Observer::PlayerTick(float DeltaTime)
     // Singleton生成時にOnBeginFrame/OnEndFrameへ登録される。
     FAp5FrameProfiler::Get();
     Super::PlayerTick(DeltaTime);
-    if (!IsLocalController() || ObservationCamera == nullptr)
+    if (!IsLocalController()) return;
+
+    if (!IsValid(PlayerCharacter))
     {
-        return;
+        PlayerCharacter=Cast<AAp5PlayerCharacter>(GetPawn());
+        if (!IsValid(PlayerCharacter)) return;
+        SetViewTarget(PlayerCharacter);
     }
+
     float MouseDeltaX=0.0f;
     float MouseDeltaY=0.0f;
     GetInputMouseDelta(MouseDeltaX,MouseDeltaY);
 
-    // 通常時はマウス移動そのものが視点回転。上へ動かせば上を見る通常のFPS向き。
+    FRotator ViewRotation=GetControlRotation();
     if (!bDrawingCut)
     {
         constexpr float MouseSensitivityX=0.65f;
         constexpr float MouseSensitivityY=0.35f;
-        Yaw+=MouseDeltaX*MouseSensitivityX;
-        // 上下感度は維持し、左右だけ高速化する。
-        Elevation+=MouseDeltaY*MouseSensitivityY;
+        ViewRotation.Yaw+=MouseDeltaX*MouseSensitivityX;
+        ViewRotation.Pitch+=MouseDeltaY*MouseSensitivityY;
     }
 
     const float RotationStep=60.0f*FMath::Min(DeltaTime,0.1f);
-    if (IsInputKeyDown(EKeys::Left)) Yaw-=RotationStep;
-    if (IsInputKeyDown(EKeys::Right)) Yaw+=RotationStep;
-    if (IsInputKeyDown(EKeys::Up)) Elevation+=RotationStep;
-    if (IsInputKeyDown(EKeys::Down)) Elevation-=RotationStep;
-    Elevation=FMath::Clamp(Elevation,-85.0f,85.0f);
-    Yaw = FMath::UnwindDegrees(Yaw);
+    if (IsInputKeyDown(EKeys::Left)) ViewRotation.Yaw-=RotationStep;
+    if (IsInputKeyDown(EKeys::Right)) ViewRotation.Yaw+=RotationStep;
+    if (IsInputKeyDown(EKeys::Up)) ViewRotation.Pitch+=RotationStep;
+    if (IsInputKeyDown(EKeys::Down)) ViewRotation.Pitch-=RotationStep;
+    ViewRotation.Pitch=FMath::Clamp(
+        FRotator::NormalizeAxis(ViewRotation.Pitch),-70.0f,65.0f);
+    ViewRotation.Yaw=FMath::UnwindDegrees(ViewRotation.Yaw);
+    ViewRotation.Roll=0.0f;
+    SetControlRotation(ViewRotation);
 
-    const FVector ViewForward=FRotator(Elevation,Yaw,0.0f).Vector();
-    const FVector HorizontalForward=
-        FVector(ViewForward.X,ViewForward.Y,0.0f).GetSafeNormal();
-    const FVector HorizontalRight=
-        FVector::CrossProduct(FVector::UpVector,HorizontalForward).GetSafeNormal();
-    const bool bFast=IsInputKeyDown(EKeys::LeftShift) || IsInputKeyDown(EKeys::RightShift);
-    const float MoveSpeed=bFast ? 1200.0f : 450.0f;
+    // TPS移動はカメラYaw基準。上下視点角は移動方向へ混ぜない。
+    const FRotator MoveRotation(0.0f,ViewRotation.Yaw,0.0f);
+    const FVector HorizontalForward=MoveRotation.Vector();
+    const FVector HorizontalRight=FRotationMatrix(MoveRotation).GetUnitAxis(EAxis::Y);
     FVector Move=FVector::ZeroVector;
     if (IsInputKeyDown(EKeys::W)) Move+=HorizontalForward;
     if (IsInputKeyDown(EKeys::S)) Move-=HorizontalForward;
     if (IsInputKeyDown(EKeys::A)) Move-=HorizontalRight;
     if (IsInputKeyDown(EKeys::D)) Move+=HorizontalRight;
+    PlayerCharacter->SetSprintEnabled(
+        IsInputKeyDown(EKeys::LeftShift) || IsInputKeyDown(EKeys::RightShift));
     if (!Move.IsNearlyZero())
-    {
-        // WASDは水平移動だけ。視点Pitchや入力ノイズでカメラ高さを変化させない。
-        const float StableZ=CameraLocation.Z;
-        CameraLocation+=Move.GetSafeNormal()*MoveSpeed*FMath::Min(DeltaTime,0.1f);
-        CameraLocation.Z=StableZ;
-    }
+        PlayerCharacter->AddMovementInput(Move.GetSafeNormal(),1.0f);
 
-    // ホイール／PageUp・Downだけは視線方向へ移動するため、意図的に高さも変わり得る。
-    const float ForwardStep=80.0f;
+    if (WasInputKeyJustPressed(EKeys::SpaceBar)) PlayerCharacter->Jump();
+    if (WasInputKeyJustReleased(EKeys::SpaceBar)) PlayerCharacter->StopJumping();
+
     if (WasInputKeyJustPressed(EKeys::MouseScrollUp))
-        CameraLocation+=ViewForward*ForwardStep;
+        PlayerCharacter->AdjustCameraDistance(-25.0f);
     if (WasInputKeyJustPressed(EKeys::MouseScrollDown))
-        CameraLocation-=ViewForward*ForwardStep;
+        PlayerCharacter->AdjustCameraDistance(25.0f);
+    const float ZoomSpeed=160.0f*FMath::Min(DeltaTime,0.1f);
     if (IsInputKeyDown(EKeys::PageUp))
-        CameraLocation+=ViewForward*MoveSpeed*FMath::Min(DeltaTime,0.1f);
+        PlayerCharacter->AdjustCameraDistance(-ZoomSpeed);
     if (IsInputKeyDown(EKeys::PageDown))
-        CameraLocation-=ViewForward*MoveSpeed*FMath::Min(DeltaTime,0.1f);
+        PlayerCharacter->AdjustCameraDistance(ZoomSpeed);
+
     if (WasInputKeyJustPressed(EKeys::R)) ResetView();
     if (WasInputKeyJustPressed(EKeys::Escape))
     {
-        UKismetSystemLibrary::QuitGame(this, this, EQuitPreference::Quit, false);
+        UKismetSystemLibrary::QuitGame(this,this,EQuitPreference::Quit,false);
     }
-    UpdateView();
     if (!IsValid(TestMonster))
     {
         for (TActorIterator<AAp5Monster> It(GetWorld()); It; ++It)
@@ -312,7 +290,7 @@ void AAp5Observer::PlayerTick(float DeltaTime)
                 && DeprojectScreenPositionToWorld(CutEnd.X,CutEnd.Y,EndOrigin,EndDirection))
             {
                 const FVector Normal=FVector::CrossProduct(StartDirection,EndDirection).GetSafeNormal();
-                const int32 Detached=TestMonster->Cut(ObservationCamera->GetActorLocation(),Normal);
+                const int32 Detached=TestMonster->Cut(StartOrigin,Normal);
                 if (Detached<0) EditStatus=TEXT("破片上限32個です。Backspaceで全リセットしてください。");
                 else if (Detached==0) EditStatus=TEXT("切断なし：本体または破片を横切る方向へ線を引いてください。");
                 else EditStatus=FString::Printf(
@@ -382,7 +360,7 @@ void AAp5ObserverHUD::DrawHUD()
         Observer->IsProjectileMode() ? TEXT("実体弾") : (Observer->IsGrabMode() ? TEXT("把持") : (Observer->IsBlastMode() ? TEXT("爆発弾") : (Observer->IsJoinMode() ? TEXT("接合") : (Observer->IsImpactMode() ? TEXT("弾痕") : (Observer->IsCutMode() ? TEXT("切断") : (Observer->IsRepairMode() ? TEXT("修復") : TEXT("穴あけ"))))))),
         DisplayRadius), FColor::White, 24, 20);
     DrawText(TEXT("3：細い　4：標準　5：太い　M：材質差　K：構造強度　9：右腕関節　L：簡易歩行　Backspace：リセット"), FColor::White, 24, 44);
-    DrawText(TEXT("マウス：視点　WASD：移動　Shift：高速　ホイール／PageUp・Down：前後　R：視点を戻す"), FColor::White, 24, 68);
+    DrawText(TEXT("TPS：マウス視点　WASD：移動　Shift：走る　Space：ジャンプ　ホイール：カメラ距離　R：視点を戻す"), FColor::White, 24, 68);
     DrawText(Observer->GetEditStatus(), FColor::Yellow, 24, 92);
     DrawText(TEXT("つながりを削り切ると分離・落下。本体・破片とも加工可能。修復は直近の分離・接合時の形まで。"), FColor::White, 24, 116);
     if (Canvas != nullptr)
