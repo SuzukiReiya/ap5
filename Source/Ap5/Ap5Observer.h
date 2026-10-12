@@ -34,6 +34,7 @@ public:
 private:
     void ResetView();
     void UpdateView();
+    bool GetAimRay(FVector& Start,FVector& Direction) const;
     bool FireProjectile(bool bExplosive);
     UPROPERTY()
     TObjectPtr<ACameraActor> ObservationCamera;
@@ -51,13 +52,11 @@ private:
     FVector2D CutEnd = FVector2D::ZeroVector;
     float BrushRadius = 20.0f;
     float FireCooldown = 0.0f;
-    FString EditStatus = TEXT("体にカーソルを合わせて左クリックしてください");
+    FString EditStatus = TEXT("画面中央の照準を体に合わせて左クリックしてください");
     float Yaw = 210.0f;
     float Elevation = 12.0f;
     float Distance = 750.0f;
     FVector CameraLocation = FVector::ZeroVector;
-    FVector2D PreviousMouse = FVector2D::ZeroVector;
-    bool bDragging = false;
 };
 
 UCLASS()
