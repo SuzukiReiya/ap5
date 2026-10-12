@@ -48,12 +48,12 @@ void AAp5Observer::BeginPlay()
 
 void AAp5Observer::ResetView()
 {
-    Yaw = 210.0f;
-    Elevation = 12.0f;
-    Distance = 750.0f;
+    Yaw=30.0f;
+    Elevation=-12.0f;
+    constexpr float InitialDistance=750.0f;
     const FVector InitialTarget(0.0f,0.0f,170.0f);
-    const FVector InitialOffset=FRotator(Elevation,Yaw,0).Vector()*Distance;
-    CameraLocation=InitialTarget+InitialOffset;
+    const FVector LookDirection=FRotator(Elevation,Yaw,0).Vector();
+    CameraLocation=InitialTarget-LookDirection*InitialDistance;
     UpdateView();
 }
 
@@ -63,10 +63,9 @@ void AAp5Observer::UpdateView()
     {
         return;
     }
-    // ゴーレム位置には追従しない。Yaw/Elevationは視線方向だけを表す。
-    const FVector LookDirection=-FRotator(Elevation,Yaw,0).Vector();
+    // FPSカメラとしてPitch/Yawをそのまま視線角に使う。
     ObservationCamera->SetActorLocation(CameraLocation);
-    ObservationCamera->SetActorRotation(LookDirection.Rotation());
+    ObservationCamera->SetActorRotation(FRotator(Elevation,Yaw,0.0f));
 }
 
 bool AAp5Observer::GetAimRay(FVector& Start,FVector& Direction) const
@@ -108,23 +107,23 @@ void AAp5Observer::PlayerTick(float DeltaTime)
     float MouseDeltaY=0.0f;
     GetInputMouseDelta(MouseDeltaX,MouseDeltaY);
 
-    // 通常時はマウス移動そのものが視点回転。切断線を描いている間だけ視点を固定する。
+    // 通常時はマウス移動そのものが視点回転。上へ動かせば上を見る通常のFPS向き。
     if (!bDrawingCut)
     {
-        constexpr float MouseSensitivity=0.13f;
+        constexpr float MouseSensitivity=0.35f;
         Yaw+=MouseDeltaX*MouseSensitivity;
-        Elevation+=MouseDeltaY*MouseSensitivity;
+        Elevation-=MouseDeltaY*MouseSensitivity;
     }
 
-    const float RotationStep = 60.0f * FMath::Min(DeltaTime, 0.1f);
-    if (IsInputKeyDown(EKeys::Left)) Yaw += RotationStep;
-    if (IsInputKeyDown(EKeys::Right)) Yaw -= RotationStep;
-    if (IsInputKeyDown(EKeys::Up)) Elevation -= RotationStep;
-    if (IsInputKeyDown(EKeys::Down)) Elevation += RotationStep;
-    Elevation = FMath::Clamp(Elevation, -75.0f, 75.0f);
+    const float RotationStep=60.0f*FMath::Min(DeltaTime,0.1f);
+    if (IsInputKeyDown(EKeys::Left)) Yaw-=RotationStep;
+    if (IsInputKeyDown(EKeys::Right)) Yaw+=RotationStep;
+    if (IsInputKeyDown(EKeys::Up)) Elevation+=RotationStep;
+    if (IsInputKeyDown(EKeys::Down)) Elevation-=RotationStep;
+    Elevation=FMath::Clamp(Elevation,-85.0f,85.0f);
     Yaw = FMath::UnwindDegrees(Yaw);
 
-    const FVector ViewForward=-FRotator(Elevation,Yaw,0).Vector();
+    const FVector ViewForward=FRotator(Elevation,Yaw,0.0f).Vector();
     const FVector HorizontalForward=
         FVector(ViewForward.X,ViewForward.Y,0.0f).GetSafeNormal();
     const FVector HorizontalRight=
@@ -137,9 +136,14 @@ void AAp5Observer::PlayerTick(float DeltaTime)
     if (IsInputKeyDown(EKeys::A)) Move-=HorizontalRight;
     if (IsInputKeyDown(EKeys::D)) Move+=HorizontalRight;
     if (!Move.IsNearlyZero())
+    {
+        // WASDは水平移動だけ。視点Pitchや入力ノイズでカメラ高さを変化させない。
+        const float StableZ=CameraLocation.Z;
         CameraLocation+=Move.GetSafeNormal()*MoveSpeed*FMath::Min(DeltaTime,0.1f);
+        CameraLocation.Z=StableZ;
+    }
 
-    // 従来のズーム操作は自由カメラの前後移動として残す。
+    // ホイール／PageUp・Downだけは視線方向へ移動するため、意図的に高さも変わり得る。
     const float ForwardStep=80.0f;
     if (WasInputKeyJustPressed(EKeys::MouseScrollUp))
         CameraLocation+=ViewForward*ForwardStep;
