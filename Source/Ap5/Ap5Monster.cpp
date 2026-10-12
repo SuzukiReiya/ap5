@@ -82,7 +82,12 @@ void AAp5Monster::AddPart(FName Name, const FVector& Center,
     const FString PartName=Name.ToString();
     const bool bLeft=PartName.StartsWith(TEXT("Left"));
     const bool bRight=PartName.StartsWith(TEXT("Right"));
-    if (PartName.Contains(TEXT("Thigh")))
+    if (bRight && (PartName.Contains(TEXT("UpperArm"))
+        || PartName.Contains(TEXT("Forearm")) || PartName.Contains(TEXT("Hand"))))
+    {
+        RightArmShapes.push_back(Shape);
+    }
+    else if (PartName.Contains(TEXT("Thigh")))
     {
         if (bLeft) LeftThighShapes.push_back(Shape);
         else if (bRight) RightThighShapes.push_back(Shape);
@@ -399,27 +404,9 @@ double AAp5Monster::ImpactResistanceAt(const Ap5Volume::Point& LocalHit, FString
     return 1.0;
 }
 
-bool AAp5Monster::ToggleMaterialResistanceTest()
-{
-    bMaterialResistanceTest=!bMaterialResistanceTest;
-    LastImpactMaterialText=bMaterialResistanceTest
-        ? TEXT("材質差ON：腕・脚=標準 / 胴体=x2 / 頭=x4")
-        : TEXT("材質差OFF：全身標準 深さ8.0 cm");
-    UE_LOG(LogTemp, Display, TEXT("AP5_MATERIAL_TEST: enabled=%d"),bMaterialResistanceTest ? 1 : 0);
-    return bMaterialResistanceTest;
-}
-
-bool AAp5Monster::ToggleStructuralStrengthTest()
-{
-    bStructuralStrengthTest=!bStructuralStrengthTest;
-    UE_LOG(LogTemp, Display, TEXT("AP5_STRUCTURAL_STRENGTH: enabled=%d"),
-        bStructuralStrengthTest ? 1 : 0);
-    return bStructuralStrengthTest;
-}
-
 int32 AAp5Monster::ApplyStructuralFailures(std::vector<int>& Changed)
 {
-    if (!bStructuralStrengthTest || bArmMotionTest || bLegMotionTest) return 0;
+    if (!bStructuralStrengthTest) return 0;
 
     std::vector<int> StructuralChanged;
     std::vector<Ap5Volume::StructuralFailureInfo> Failures;
@@ -782,7 +769,8 @@ void AAp5Monster::UpdateArmMotion(float DeltaSeconds)
     for (int32 I=0;I<static_cast<int32>(Pieces.Items.size());++I)
     {
         Ap5Volume::Piece& State=Pieces.Items[I];
-        if (!State.Driven || !State.Fixed || !PieceMeshes.IsValidIndex(I)) continue;
+        if (!State.Driven || !State.Fixed || State.DriveId!=5
+            || !PieceMeshes.IsValidIndex(I)) continue;
         const FVector Pivot=EnginePoint(State.JointPivot);
         const FVector RotatedPivot=Rotation.RotateVector(Pivot);
         const FVector Translation=Pivot-RotatedPivot;
@@ -806,25 +794,6 @@ void AAp5Monster::Tick(float DeltaSeconds)
     UpdateArmMotion(DeltaSeconds);
     UpdateLegMotion(DeltaSeconds);
     SyncPhysicsState();
-}
-
-bool AAp5Monster::ToggleArmMotionTest()
-{
-    bArmMotionTest=!bArmMotionTest;
-    if (bArmMotionTest && bLegMotionTest)
-    {
-        bLegMotionTest=false;
-        SetActorTransform(LegMotionOriginTransform,false,nullptr,ETeleportType::TeleportPhysics);
-        LegMotionTime=0.0f;
-        LegWalkDistance=0.0f;
-        bLegWalkBlocked=false;
-        bLegSupportAnchorValid=false;
-        LegWalkVelocityWorld=FVector::ZeroVector;
-    }
-    ArmMotionTime=0.0f;
-    ResetShape();
-    UE_LOG(LogTemp, Display, TEXT("AP5_ARM_MOTION: enabled=%d"), bArmMotionTest ? 1 : 0);
-    return bArmMotionTest;
 }
 
 bool AAp5Monster::GetDrivenFootContactLocal(int32 DriveId,FVector& ContactLocal) const
@@ -1021,6 +990,7 @@ void AAp5Monster::CollapseWalkingBody(int32 FailedSupportDriveId)
     if (!bLegMotionTest) return;
 
     int32 BodyIndex=INDEX_NONE;
+    int32 RightArmIndex=INDEX_NONE;
     int32 LeftThighIndex=INDEX_NONE;
     int32 RightThighIndex=INDEX_NONE;
     int32 LeftLowerIndex=INDEX_NONE;
@@ -1029,6 +999,7 @@ void AAp5Monster::CollapseWalkingBody(int32 FailedSupportDriveId)
     {
         const Ap5Volume::Piece& P=Pieces.Items[I];
         if (!P.Driven && BodyIndex==INDEX_NONE) BodyIndex=I;
+        else if (P.DriveId==5) RightArmIndex=I;
         else if (P.DriveId==1) LeftThighIndex=I;
         else if (P.DriveId==2) RightThighIndex=I;
         else if (P.DriveId==3) LeftLowerIndex=I;
@@ -1036,10 +1007,15 @@ void AAp5Monster::CollapseWalkingBody(int32 FailedSupportDriveId)
     }
 
     // Constraint位置は物理自由化前の関節姿勢から求める。
+    FVector RightShoulderWorld=FVector::ZeroVector;
     FVector LeftHipWorld=FVector::ZeroVector;
     FVector RightHipWorld=FVector::ZeroVector;
     FVector LeftKneeWorld=FVector::ZeroVector;
     FVector RightKneeWorld=FVector::ZeroVector;
+    if (RightArmIndex!=INDEX_NONE)
+        RightShoulderWorld=GetActorTransform().TransformPosition(
+            EnginePoint(Pieces.Items[RightArmIndex].ToWorld(
+                Ap5Volume::Point(0,92,220))));
     if (LeftThighIndex!=INDEX_NONE)
         LeftHipWorld=GetActorTransform().TransformPosition(
             EnginePoint(Pieces.Items[LeftThighIndex].ToWorld(
@@ -1077,8 +1053,11 @@ void AAp5Monster::CollapseWalkingBody(int32 FailedSupportDriveId)
         RebuildMesh(I);
     }
 
-    // Chaosへ移した後に股関節・膝関節をConstraintで接続する。
+    // Chaosへ移した後に肩・股関節・膝関節をConstraintで接続する。
     // 破壊済みで対応Pieceが存在しない関節は作らない。
+    CreateCollapseConstraint(
+        BodyIndex,RightArmIndex,RightShoulderWorld,
+        Ap5Volume::Point(0,82,233),Ap5Volume::Point(0,92,220),60.0f,40.0f);
     CreateCollapseConstraint(
         BodyIndex,LeftThighIndex,LeftHipWorld,
         Ap5Volume::Point(0,-34,112),Ap5Volume::Point(0,-34,112),55.0f,35.0f);
@@ -1252,6 +1231,25 @@ void AAp5Monster::UpdateLegMotion(float DeltaSeconds)
         LegWalkVelocityWorld=FVector::ZeroVector;
     }
 
+    // 50m床の中央付近だけを使って往復する。端へ近づく前に180度反転し、
+    // 新しい向きを歩行原点として支持足を取り直す。
+    constexpr float PatrolLegDistanceCm=900.0f;
+    if (LegWalkDistance>=PatrolLegDistanceCm)
+    {
+        FTransform Turned=GetActorTransform();
+        FRotator Rotation=Turned.Rotator();
+        Rotation.Yaw=FMath::UnwindDegrees(Rotation.Yaw+180.0f);
+        Turned.SetRotation(Rotation.Quaternion());
+        SetActorTransform(Turned,false,nullptr,ETeleportType::TeleportPhysics);
+        LegMotionOriginTransform=Turned;
+        LegWalkDistance=0.0f;
+        ActiveSupportDriveId=INDEX_NONE;
+        bLegSupportAnchorValid=false;
+        LegSupportAnchorWorld=FVector::ZeroVector;
+        LegSupportLossSeconds=0.0f;
+        UE_LOG(LogTemp, Display, TEXT("AP5_PATROL_TURN: yaw=%.1f"),Rotation.Yaw);
+    }
+
     // Actor位置を確定した後で各関節PieceのWorldTransformを反映する。
     for (int32 I=0;I<static_cast<int32>(Pieces.Items.size());++I)
     {
@@ -1293,101 +1291,72 @@ void AAp5Monster::UpdateLegMotion(float DeltaSeconds)
     }
 }
 
-bool AAp5Monster::ToggleLegMotionTest()
-{
-    const bool bEnable=!bLegMotionTest;
-    if (bEnable)
-    {
-        bLegMotionTest=true;
-        bArmMotionTest=false;
-        LegMotionOriginTransform=GetActorTransform();
-    }
-    else
-    {
-        bLegMotionTest=false;
-        SetActorTransform(LegMotionOriginTransform,false,nullptr,ETeleportType::TeleportPhysics);
-    }
-    LegMotionTime=0.0f;
-    LegWalkDistance=0.0f;
-    bLegWalkBlocked=false;
-    ActiveSupportDriveId=INDEX_NONE;
-    LegSupportLossSeconds=0.0f;
-    bLegSupportAnchorValid=false;
-    LegSupportAnchorWorld=FVector::ZeroVector;
-    LegWalkVelocityWorld=FVector::ZeroVector;
-    ResetShape();
-    UE_LOG(LogTemp, Display, TEXT("AP5_LEG_MOTION: enabled=%d walking=1"),
-        bLegMotionTest ? 1 : 0);
-    return bLegMotionTest;
-}
-
 void AAp5Monster::ResetShape()
 {
     EndGrab();
     DestroyCollapseConstraints();
-    if (bLegMotionTest)
-        SetActorTransform(LegMotionOriginTransform,false,nullptr,ETeleportType::TeleportPhysics);
+
+    // 全リセットは通常ゲーム状態へ戻す。腕運動・歩行・材質差・構造強度は常時ON。
+    bArmMotionTest=true;
+    bLegMotionTest=true;
+    bMaterialResistanceTest=true;
+    bStructuralStrengthTest=true;
     ClearJoinSelection();
+
     for (int32 I=0;I<PieceVisualChunks.Num();++I) DestroyVisualChunks(I);
     PieceVisualChunks.Empty();
     for (UDynamicMeshComponent* Mesh : PieceMeshes) Mesh->DestroyComponent();
     PieceMeshes.Empty();
-    bool ArticulatedReady=true;
-    if (bArmMotionTest)
-    {
-        // +Y側の右腕を肩の外縁で切りしろ無しに分け、肩中心付近を関節拘束点にする。
-        ArticulatedReady=Pieces.ResetArticulated(
-            InitialVolume,Ap5Volume::Point(0,72,233),Ap5Volume::Point(0,1,0),
-            Ap5Volume::Point(0,72,233),Ap5Volume::Point(0,82,233));
-    }
-    else if (bLegMotionTest)
-    {
-        Ap5Volume::Field BodyVolume,LeftThigh,LeftLower,RightThigh,RightLower;
-        BodyVolume.InitializeUnion(BodyShapes);
-        LeftThigh.InitializeUnion(LeftThighShapes);
-        LeftLower.InitializeUnion(LeftLowerLegShapes);
-        RightThigh.InitializeUnion(RightThighShapes);
-        RightLower.InitializeUnion(RightLowerLegShapes);
 
-        std::vector<Ap5Volume::DrivenPartSetup> DrivenParts(4);
-        DrivenParts[0].Volume=std::move(LeftThigh);
-        DrivenParts[0].JointPivot=Ap5Volume::Point(0,-34,118);
-        DrivenParts[0].JointAnchor=Ap5Volume::Point(0,-34,112);
-        DrivenParts[0].DriveId=1;
+    Ap5Volume::Field BodyVolume,RightArm,LeftThigh,LeftLower,RightThigh,RightLower;
+    BodyVolume.InitializeUnion(BodyShapes);
+    RightArm.InitializeUnion(RightArmShapes);
+    LeftThigh.InitializeUnion(LeftThighShapes);
+    LeftLower.InitializeUnion(LeftLowerLegShapes);
+    RightThigh.InitializeUnion(RightThighShapes);
+    RightLower.InitializeUnion(RightLowerLegShapes);
 
-        DrivenParts[1].Volume=std::move(RightThigh);
-        DrivenParts[1].JointPivot=Ap5Volume::Point(0,34,118);
-        DrivenParts[1].JointAnchor=Ap5Volume::Point(0,34,112);
-        DrivenParts[1].DriveId=2;
+    std::vector<Ap5Volume::DrivenPartSetup> DrivenParts(5);
 
-        DrivenParts[2].Volume=std::move(LeftLower);
-        DrivenParts[2].JointPivot=Ap5Volume::Point(0,-36,66);
-        DrivenParts[2].JointAnchor=Ap5Volume::Point(0,-36,66);
-        DrivenParts[2].ParentAnchor=Ap5Volume::Point(0,-34,66);
-        DrivenParts[2].DriveId=3;
-        DrivenParts[2].ParentDriveId=1;
-        DrivenParts[2].GroundSupport=true;
+    // 右腕。DriveId 5にして、rootのStructureId 0と衝突させない。
+    DrivenParts[0].Volume=std::move(RightArm);
+    DrivenParts[0].JointPivot=Ap5Volume::Point(0,82,233);
+    DrivenParts[0].JointAnchor=Ap5Volume::Point(0,92,220);
+    DrivenParts[0].DriveId=5;
 
-        DrivenParts[3].Volume=std::move(RightLower);
-        DrivenParts[3].JointPivot=Ap5Volume::Point(0,36,66);
-        DrivenParts[3].JointAnchor=Ap5Volume::Point(0,36,66);
-        DrivenParts[3].ParentAnchor=Ap5Volume::Point(0,34,66);
-        DrivenParts[3].DriveId=4;
-        DrivenParts[3].ParentDriveId=2;
-        DrivenParts[3].GroundSupport=true;
+    DrivenParts[1].Volume=std::move(LeftThigh);
+    DrivenParts[1].JointPivot=Ap5Volume::Point(0,-34,118);
+    DrivenParts[1].JointAnchor=Ap5Volume::Point(0,-34,112);
+    DrivenParts[1].DriveId=1;
 
-        // 上半身の仮支持点は腹部ではなく左右股関節側に置く。
-        // 腹部へ穴を開けただけで固定解除されてChaos物理へ移行しないようにする。
-        ArticulatedReady=Pieces.ResetDrivenParts(
-            BodyVolume,DrivenParts,{
-                Ap5Volume::Point(0,-34,112),
-                Ap5Volume::Point(0,34,112)
-            });
-    }
-    else
-    {
-        Pieces.Reset(InitialVolume);
-    }
+    DrivenParts[2].Volume=std::move(RightThigh);
+    DrivenParts[2].JointPivot=Ap5Volume::Point(0,34,118);
+    DrivenParts[2].JointAnchor=Ap5Volume::Point(0,34,112);
+    DrivenParts[2].DriveId=2;
+
+    DrivenParts[3].Volume=std::move(LeftLower);
+    DrivenParts[3].JointPivot=Ap5Volume::Point(0,-36,66);
+    DrivenParts[3].JointAnchor=Ap5Volume::Point(0,-36,66);
+    DrivenParts[3].ParentAnchor=Ap5Volume::Point(0,-34,66);
+    DrivenParts[3].DriveId=3;
+    DrivenParts[3].ParentDriveId=1;
+    DrivenParts[3].GroundSupport=true;
+
+    DrivenParts[4].Volume=std::move(RightLower);
+    DrivenParts[4].JointPivot=Ap5Volume::Point(0,36,66);
+    DrivenParts[4].JointAnchor=Ap5Volume::Point(0,36,66);
+    DrivenParts[4].ParentAnchor=Ap5Volume::Point(0,34,66);
+    DrivenParts[4].DriveId=4;
+    DrivenParts[4].ParentDriveId=2;
+    DrivenParts[4].GroundSupport=true;
+
+    // 上半身の支持は左右股関節側。腹部だけの損傷で支持を失わない。
+    const bool ArticulatedReady=Pieces.ResetDrivenParts(
+        BodyVolume,DrivenParts,{
+            Ap5Volume::Point(0,-34,112),
+            Ap5Volume::Point(0,34,112)
+        });
+
     if (!ArticulatedReady)
     {
         bArmMotionTest=false;
@@ -1395,12 +1364,14 @@ void AAp5Monster::ResetShape()
         Pieces.Reset(InitialVolume);
         UE_LOG(LogTemp, Error, TEXT("AP5_ARTICULATED_SETUP_FAILED"));
     }
+
     for (int32 I=0;I<static_cast<int32>(Pieces.Items.size());++I)
     {
         PieceMeshes.Add(CreatePiece());
         PieceVisualChunks.AddDefaulted();
         RebuildMesh(I);
     }
+
     ArmMotionTime=0.0f;
     LegMotionTime=0.0f;
     LegWalkDistance=0.0f;
@@ -1410,9 +1381,12 @@ void AAp5Monster::ResetShape()
     bLegSupportAnchorValid=false;
     LegSupportAnchorWorld=FVector::ZeroVector;
     LegWalkVelocityWorld=FVector::ZeroVector;
+    LegMotionOriginTransform=GetActorTransform();
+
     UpdateArmMotion(0.0f);
     UpdateLegMotion(0.0f);
     SetActorTickEnabled(bArmMotionTest || bLegMotionTest);
-    UE_LOG(LogTemp, Display, TEXT("AP5_VOLUME_RESET: arm=%d legs=%d pieces=%d"),
-        bArmMotionTest ? 1 : 0,bLegMotionTest ? 1 : 0,static_cast<int32>(Pieces.Items.size()));
+    UE_LOG(LogTemp, Display,
+        TEXT("AP5_VOLUME_RESET: arm=1 legs=1 material=1 strength=1 pieces=%d"),
+        static_cast<int32>(Pieces.Items.size()));
 }
