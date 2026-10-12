@@ -109,6 +109,10 @@ private:
         UPhysicsConstraintComponent* Component = nullptr;
         UDynamicMeshComponent* Parent = nullptr;
         UDynamicMeshComponent* Child = nullptr;
+        int32 ParentStructureId = INDEX_NONE;
+        int32 ChildStructureId = INDEX_NONE;
+        int32 ParentInitialMaterialSamples = 0;
+        int32 ChildInitialMaterialSamples = 0;
         Ap5Volume::Point ParentAnchor;
         Ap5Volume::Point ChildAnchor;
     };
