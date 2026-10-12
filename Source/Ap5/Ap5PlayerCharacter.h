@@ -5,6 +5,7 @@
 #include "Ap5PlayerCharacter.generated.h"
 
 class UCameraComponent;
+class USceneComponent;
 class USpringArmComponent;
 class UStaticMeshComponent;
 
@@ -18,6 +19,7 @@ public:
 
     UCameraComponent* GetFollowCamera() const { return FollowCamera; }
     FVector GetProjectileMuzzleLocation() const;
+    void SetAimPitch(float PitchDegrees);
     void SetSprintEnabled(bool bEnabled);
     void AdjustCameraDistance(float DeltaCm);
     void ResetCameraDistance();
@@ -36,10 +38,49 @@ private:
     TObjectPtr<UStaticMeshComponent> HeadVisual;
 
     UPROPERTY()
+    TObjectPtr<UStaticMeshComponent> PelvisVisual;
+
+    UPROPERTY()
+    TObjectPtr<UStaticMeshComponent> LeftUpperArmVisual;
+
+    UPROPERTY()
+    TObjectPtr<UStaticMeshComponent> LeftForearmVisual;
+
+    UPROPERTY()
+    TObjectPtr<UStaticMeshComponent> LeftHandVisual;
+
+    UPROPERTY()
+    TObjectPtr<UStaticMeshComponent> LeftThighVisual;
+
+    UPROPERTY()
+    TObjectPtr<UStaticMeshComponent> LeftShinVisual;
+
+    UPROPERTY()
+    TObjectPtr<UStaticMeshComponent> LeftFootVisual;
+
+    UPROPERTY()
+    TObjectPtr<UStaticMeshComponent> RightThighVisual;
+
+    UPROPERTY()
+    TObjectPtr<UStaticMeshComponent> RightShinVisual;
+
+    UPROPERTY()
+    TObjectPtr<UStaticMeshComponent> RightFootVisual;
+
+    UPROPERTY()
+    TObjectPtr<USceneComponent> WeaponPivot;
+
+    UPROPERTY()
     TObjectPtr<UStaticMeshComponent> RightArmVisual;
 
     UPROPERTY()
+    TObjectPtr<UStaticMeshComponent> RightForearmVisual;
+
+    UPROPERTY()
     TObjectPtr<UStaticMeshComponent> RightHandVisual;
+
+    UPROPERTY()
+    TObjectPtr<UStaticMeshComponent> GunVisual;
 
     float WalkSpeed = 450.0f;
     float SprintSpeed = 750.0f;
