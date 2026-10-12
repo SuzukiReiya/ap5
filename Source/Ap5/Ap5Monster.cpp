@@ -1080,11 +1080,15 @@ void AAp5Monster::UpdateLegMotion(float DeltaSeconds)
 
         if (bLeftLower || bRightLower)
         {
-            // 遊脚の前半だけ膝を曲げ、着地前には伸ばす。支持脚の膝は伸ばしたまま。
-            const float SwingLift=bSupportLeg ? 0.0f : FMath::Max(0.0f,-LegSwing);
+            // 遊脚の膝は、離地時0 → 遊脚中央で最大 → 着地前0 の滑らかな包絡にする。
+            // cos^2は支持切替点(cos=0)で角度も角速度も0になるため、
+            // 支持脚→遊脚へ切り替わる瞬間の膝スナップを防げる。
+            const float SwingLift=bSupportLeg ? 0.0f
+                : SupportPhase*SupportPhase;
+            const float SwingLiftSpeed=bSupportLeg ? 0.0f
+                : -2.0f*SupportPhase*Swing*Frequency;
             const float KneeDegrees=-36.0f*SwingLift;
-            const float KneeSpeedDegrees=(!bSupportLeg && LegSwing<0.0f)
-                ? 36.0f*LegSwingSpeed : 0.0f;
+            const float KneeSpeedDegrees=-36.0f*SwingLiftSpeed;
             const float KneeAngle=FMath::DegreesToRadians(KneeDegrees);
             const float KneeAngularSpeed=FMath::DegreesToRadians(KneeSpeedDegrees);
             const FVector KneePivot=FVector(0.0f,bLeft ? -36.0f : 36.0f,66.0f);
