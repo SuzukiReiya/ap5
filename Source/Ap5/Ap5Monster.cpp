@@ -367,6 +367,7 @@ int32 AAp5Monster::ApplyBrush(const FVector& Start, const FVector& Direction, fl
         Samples=Pieces.Brush(
             Ap5Volume::Point(LocalStart.X, LocalStart.Y, LocalStart.Z),
             Ap5Volume::Point(LocalDirection.X, LocalDirection.Y, LocalDirection.Z), Radius, bRepair, Changed);
+        if (!bRepair && Samples>0) ApplyStructuralFailures(Changed);
     }
     LastSeparatedPieces = static_cast<int32>(Pieces.Items.size()) - Before;
     if (!Changed.empty()) RefreshPieces(Changed);
@@ -408,6 +409,38 @@ bool AAp5Monster::ToggleMaterialResistanceTest()
     return bMaterialResistanceTest;
 }
 
+bool AAp5Monster::ToggleStructuralStrengthTest()
+{
+    bStructuralStrengthTest=!bStructuralStrengthTest;
+    UE_LOG(LogTemp, Display, TEXT("AP5_STRUCTURAL_STRENGTH: enabled=%d"),
+        bStructuralStrengthTest ? 1 : 0);
+    return bStructuralStrengthTest;
+}
+
+int32 AAp5Monster::ApplyStructuralFailures(std::vector<int>& Changed)
+{
+    if (!bStructuralStrengthTest || bArmMotionTest || bLegMotionTest) return 0;
+
+    std::vector<int> StructuralChanged;
+    std::vector<Ap5Volume::StructuralFailureInfo> Failures;
+    const int32 Count=Pieces.BreakWeakSections(StructuralChanged,Failures);
+    for (int Index : StructuralChanged)
+    {
+        bool Exists=false;
+        for (int Existing : Changed)
+            if (Existing==Index) { Exists=true; break; }
+        if (!Exists) Changed.push_back(Index);
+    }
+    for (const Ap5Volume::StructuralFailureInfo& Info : Failures)
+    {
+        UE_LOG(LogTemp, Display,
+            TEXT("AP5_STRUCTURAL_BREAK: piece=%d section=%d load=%d ratio=%.1f plane=(%.1f,%.1f,%.1f)"),
+            Info.PieceIndex,Info.SectionSamples,Info.LoadedSamples,Info.LoadRatio,
+            Info.PlanePoint.X,Info.PlanePoint.Y,Info.PlanePoint.Z);
+    }
+    return Count;
+}
+
 int32 AAp5Monster::ApplyImpact(const FVector& Start, const FVector& Direction, float Radius)
 {
     const double Started = FPlatformTime::Seconds();
@@ -438,6 +471,7 @@ int32 AAp5Monster::ApplyImpact(const FVector& Start, const FVector& Direction, f
         FAp5ProfileScope Profile(EAp5ProfileProcess::VolumeEdit);
         Samples=Pieces.Impact(
             VolumePoint(LocalStart),VolumePoint(LocalDirection),Radius,Depth,Changed);
+        if (Samples>0) ApplyStructuralFailures(Changed);
     }
     LastSeparatedPieces = static_cast<int32>(Pieces.Items.size()) - Before;
     if (!Changed.empty()) RefreshPieces(Changed);
@@ -479,6 +513,7 @@ int32 AAp5Monster::ApplyProjectileHit(UPrimitiveComponent* HitComponent, const F
         FAp5ProfileScope Profile(EAp5ProfileProcess::VolumeEdit);
         Samples=Pieces.ImpactAt(Target,VolumePoint(LocalHit),VolumePoint(LocalDirection),
             Radius,Depth,Changed);
+        if (Samples>0) ApplyStructuralFailures(Changed);
     }
     LastSeparatedPieces=static_cast<int32>(Pieces.Items.size())-Before;
     if (!Changed.empty()) RefreshPieces(Changed);
@@ -512,6 +547,7 @@ int32 AAp5Monster::ApplyProjectileBlast(const FVector& HitPoint, const FVector& 
     {
         FAp5ProfileScope Profile(EAp5ProfileProcess::VolumeEdit);
         Samples=Pieces.Blast(VolumePoint(Center),Radius,550.0,Changed);
+        if (Samples>0) ApplyStructuralFailures(Changed);
     }
     LastSeparatedPieces=static_cast<int32>(Pieces.Items.size())-Before;
     if (!Changed.empty()) RefreshPieces(Changed);
@@ -566,6 +602,7 @@ int32 AAp5Monster::ApplyBlast(const FVector& Start, const FVector& Direction, fl
     {
         FAp5ProfileScope Profile(EAp5ProfileProcess::VolumeEdit);
         Samples=Pieces.Blast(VolumePoint(Center),Radius,550.0,Changed);
+        if (Samples>0) ApplyStructuralFailures(Changed);
     }
     LastSeparatedPieces=static_cast<int32>(Pieces.Items.size())-Before;
     if (!Changed.empty()) RefreshPieces(Changed);
