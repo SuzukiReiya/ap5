@@ -34,6 +34,86 @@ void AAp5Observer::BeginPlay()
     }
 }
 
+FString AAp5Observer::GetSelectedToolName() const
+{
+    switch (SelectedHotbarIndex)
+    {
+    case 0: return TEXT("ハンドガン");
+    case 1: return TEXT("大口径銃");
+    case 2: return TEXT("グレネードランチャー");
+    case 3: return TEXT("ドリル");
+    case 4: return TEXT("修復ツール");
+    case 5: return TEXT("カッター");
+    case 6: return TEXT("接合ツール");
+    case 7: return TEXT("グラブツール");
+    default: return TEXT("不明");
+    }
+}
+
+void AAp5Observer::SelectHotbarIndex(int32 Index)
+{
+    constexpr int32 SlotCount=8;
+    Index=(Index%SlotCount+SlotCount)%SlotCount;
+    if (IsValid(TestMonster))
+    {
+        if (bGrabMode) TestMonster->EndGrab();
+        if (bJoinMode) TestMonster->ClearJoinSelection();
+    }
+
+    SelectedHotbarIndex=Index;
+    bProjectileMode=false;
+    bBlastMode=false;
+    bGrabMode=false;
+    bImpactMode=false;
+    bRepairMode=false;
+    bCutMode=false;
+    bJoinMode=false;
+    bDrawingCut=false;
+    FireCooldown=0.0f;
+
+    switch (SelectedHotbarIndex)
+    {
+    case 0:
+        bProjectileMode=true;
+        BrushRadius=12.0f;
+        EditStatus=TEXT("ハンドガン：右手からクロスヘアへ通常弾を発射");
+        break;
+    case 1:
+        bProjectileMode=true;
+        BrushRadius=30.0f;
+        EditStatus=TEXT("大口径銃：右手から大きな弾痕を作る実体弾を発射");
+        break;
+    case 2:
+        bBlastMode=true;
+        BrushRadius=30.0f;
+        EditStatus=TEXT("グレネードランチャー：着弾地点を半径45 cmで爆破");
+        break;
+    case 3:
+        BrushRadius=20.0f;
+        EditStatus=TEXT("ドリル：クロスヘア方向へ貫通穴を開ける");
+        break;
+    case 4:
+        bRepairMode=true;
+        BrushRadius=20.0f;
+        EditStatus=TEXT("修復ツール：クロスヘア方向の欠損を修復");
+        break;
+    case 5:
+        bCutMode=true;
+        EditStatus=TEXT("カッター：左ドラッグで切断面を指定");
+        break;
+    case 6:
+        bJoinMode=true;
+        EditStatus=TEXT("接合ツール：破片を選び、次に接合先を選択");
+        break;
+    case 7:
+        bGrabMode=true;
+        EditStatus=TEXT("グラブツール：破片を掴んで移動・投擲");
+        break;
+    default:
+        break;
+    }
+}
+
 void AAp5Observer::ResetView()
 {
     if (!IsValid(PlayerCharacter)) return;
@@ -149,9 +229,9 @@ void AAp5Observer::PlayerTick(float DeltaTime)
     if (WasInputKeyJustReleased(EKeys::SpaceBar)) PlayerCharacter->StopJumping();
 
     if (WasInputKeyJustPressed(EKeys::MouseScrollUp))
-        PlayerCharacter->AdjustCameraDistance(-25.0f);
+        SelectHotbarIndex(SelectedHotbarIndex-1);
     if (WasInputKeyJustPressed(EKeys::MouseScrollDown))
-        PlayerCharacter->AdjustCameraDistance(25.0f);
+        SelectHotbarIndex(SelectedHotbarIndex+1);
     const float ZoomSpeed=160.0f*FMath::Min(DeltaTime,0.1f);
     if (IsInputKeyDown(EKeys::PageUp))
         PlayerCharacter->AdjustCameraDistance(-ZoomSpeed);
@@ -171,87 +251,11 @@ void AAp5Observer::PlayerTick(float DeltaTime)
             break;
         }
     }
-    if (WasInputKeyJustPressed(EKeys::P))
-    {
-        bProjectileMode=true; bGrabMode=false; bBlastMode=false; bJoinMode=false;
-        bImpactMode=false; bRepairMode=false; bCutMode=false; bDrawingCut=false;
-        FireCooldown=0.0f;
-        EditStatus=TEXT("実体弾：右手から中央クロスヘアへ発射。左ボタン長押しで連射します。");
-    }
-    if (WasInputKeyJustPressed(EKeys::G))
-    {
-        bProjectileMode=false; bGrabMode=true; bBlastMode=false; bJoinMode=false; bImpactMode=false; bRepairMode=false; bCutMode=false; bDrawingCut=false;
-        EditStatus=TEXT("把持：分離した破片を左ボタンで掴み、押したまま移動して離してください。");
-    }
-    if (WasInputKeyJustPressed(EKeys::Zero))
-    {
-        bProjectileMode=false; bGrabMode=false; bBlastMode=true; bJoinMode=false; bImpactMode=false; bRepairMode=false; bCutMode=false; bDrawingCut=false;
-        FireCooldown=0.0f;
-        EditStatus=TEXT("爆発弾：右手から中央クロスヘアへ発射。着弾地点で球状破壊します。");
-    }
-    if (WasInputKeyJustPressed(EKeys::One)) { bProjectileMode = false; bGrabMode = false; bBlastMode = false; bJoinMode = false; bImpactMode = false; bRepairMode = false; bCutMode = false; bDrawingCut = false; }
-    if (WasInputKeyJustPressed(EKeys::Two)) { bProjectileMode = false; bGrabMode = false; bBlastMode = false; bJoinMode = false; bImpactMode = false; bRepairMode = true; bCutMode = false; bDrawingCut = false; }
-    if (WasInputKeyJustPressed(EKeys::Six)) { bProjectileMode = false; bGrabMode = false; bBlastMode = false; bJoinMode = false; bImpactMode = false; bCutMode = true; bDrawingCut = false; }
-    if (WasInputKeyJustPressed(EKeys::Seven)) { bProjectileMode = false; bGrabMode = false; bBlastMode = false; bJoinMode = false; bImpactMode = true; bRepairMode = false; bCutMode = false; bDrawingCut = false; }
-    if (WasInputKeyJustPressed(EKeys::Eight))
-    {
-        bProjectileMode = false; bGrabMode = false; bBlastMode = false; bJoinMode = true; bImpactMode = false; bRepairMode = false; bCutMode = false; bDrawingCut = false;
-        if (IsValid(TestMonster)) TestMonster->ClearJoinSelection();
-        EditStatus = TEXT("接合：戻す破片をクリックし、次に接合先をクリックしてください。");
-    }
-    if (WasInputKeyJustPressed(EKeys::Three)) BrushRadius = 12;
-    if (WasInputKeyJustPressed(EKeys::Four)) BrushRadius = 20;
-    if (WasInputKeyJustPressed(EKeys::Five)) BrushRadius = 30;
-    if (!IsValid(TestMonster)) return;
-    if (WasInputKeyJustPressed(EKeys::M))
-    {
-        const bool bEnabled=TestMonster->ToggleMaterialResistanceTest();
-        EditStatus=bEnabled
-            ? TEXT("材質差ON：弾痕7で比較。腕・脚=標準、胴体=硬質x2、頭=硬質x4。")
-            : TEXT("材質差OFF：弾痕は全身とも標準深さ8 cmです。");
-    }
-    if (WasInputKeyJustPressed(EKeys::K))
-    {
-        const bool bEnabled=TestMonster->ToggleStructuralStrengthTest();
-        EditStatus=bEnabled
-            ? TEXT("構造強度ON：細い接続部は自己荷重で破断します。肩などを削って確認してください。")
-            : TEXT("構造強度OFF：完全に非連結になるまで形状だけでは分離しません。");
-    }
-    if (!bGrabMode) TestMonster->EndGrab();
-    if (WasInputKeyJustPressed(EKeys::Nine))
-    {
-        bProjectileMode=false;
-        bBlastMode=false;
-        bGrabMode=false;
-        bJoinMode=false;
-        bDrawingCut=false;
-        TestMonster->EndGrab();
-        TestMonster->ClearJoinSelection();
-        const bool bEnabled=TestMonster->ToggleArmMotionTest();
-        EditStatus=bEnabled
-            ? TEXT("右腕関節動作を開始。動いている腕を1/2/6/7で加工し、切断後は8で再接合できます。")
-            : TEXT("右腕関節動作を終了し、通常の一体形状へ戻しました。");
-    }
-    if (WasInputKeyJustPressed(EKeys::L))
-    {
-        bProjectileMode=false;
-        bBlastMode=false;
-        bGrabMode=false;
-        bJoinMode=false;
-        bDrawingCut=false;
-        TestMonster->EndGrab();
-        TestMonster->ClearJoinSelection();
-        const bool bEnabled=TestMonster->ToggleLegMotionTest();
-        EditStatus=bEnabled
-            ? TEXT("簡易歩行を開始。接地脚／遊脚を切り替えながら前進します。脚欠損時は前進を停止します。")
-            : TEXT("簡易歩行を終了し、開始位置で通常の一体形状へ戻しました。");
-    }
-    if (!bJoinMode) TestMonster->ClearJoinSelection();
     if (WasInputKeyJustPressed(EKeys::BackSpace))
     {
         TestMonster->ResetShape();
         bDrawingCut = false;
-        EditStatus = TEXT("全形状を初期状態に戻しました（修復操作とは別）");
+        EditStatus = TEXT("モンスターを初期状態へ戻しました");
     }
     FireCooldown=FMath::Max(0.0f,FireCooldown-DeltaTime);
     if (bProjectileMode || bBlastMode)
@@ -263,8 +267,9 @@ void AAp5Observer::PlayerTick(float DeltaTime)
             {
                 FireCooldown=0.12f;
                 EditStatus=bExplosive
-                    ? FString::Printf(TEXT("爆発弾を発射：速度1800 cm/s / 着弾爆発半径 %.0f cm"),BrushRadius*1.5f)
-                    : FString::Printf(TEXT("実体弾を発射：速度1800 cm/s / 弾痕半径 %.0f cm"),BrushRadius);
+                    ? FString::Printf(TEXT("グレネード発射：爆発半径 %.0f cm"),BrushRadius*1.5f)
+                    : FString::Printf(TEXT("%s：弾痕半径 %.0f cm"),
+                        *GetSelectedToolName(),BrushRadius);
             }
             else
             {
@@ -376,17 +381,14 @@ bool AAp5Observer::GetGrabMarker(FVector2D& ScreenPosition) const
 void AAp5ObserverHUD::DrawHUD()
 {
     Super::DrawHUD();
-    DrawRect(FLinearColor(0, 0, 0, 0.75f), 12, 12, 1000, 134);
-    const AAp5Observer* Observer = Cast<AAp5Observer>(GetOwningPlayerController());
-    if (Observer == nullptr) return;
-    const float DisplayRadius=Observer->IsBlastMode() ? Observer->GetBrushRadius()*1.5f : Observer->GetBrushRadius();
-    DrawText(FString::Printf(TEXT("%s　半径 %.0f cm　P：実体弾　0：爆発弾　G：把持　7：弾痕　1：穴　2：修復　6：切断　8：接合"),
-        Observer->IsProjectileMode() ? TEXT("実体弾") : (Observer->IsGrabMode() ? TEXT("把持") : (Observer->IsBlastMode() ? TEXT("爆発弾") : (Observer->IsJoinMode() ? TEXT("接合") : (Observer->IsImpactMode() ? TEXT("弾痕") : (Observer->IsCutMode() ? TEXT("切断") : (Observer->IsRepairMode() ? TEXT("修復") : TEXT("穴あけ"))))))),
-        DisplayRadius), FColor::White, 24, 20);
-    DrawText(TEXT("3：細い　4：標準　5：太い　M：材質差　K：構造強度　9：右腕関節　L：簡易歩行　Backspace：リセット"), FColor::White, 24, 44);
-    DrawText(TEXT("TPS：クロスヘア正面固定　W/S：前後　A/D：横歩き　Shift：走る　Space：ジャンプ　ホイール：距離"), FColor::White, 24, 68);
-    DrawText(Observer->GetEditStatus(), FColor::Yellow, 24, 92);
-    DrawText(TEXT("つながりを削り切ると分離・落下。本体・破片とも加工可能。修復は直近の分離・接合時の形まで。"), FColor::White, 24, 116);
+    DrawRect(FLinearColor(0,0,0,0.70f),12,12,780,92);
+    const AAp5Observer* Observer=Cast<AAp5Observer>(GetOwningPlayerController());
+    if (Observer==nullptr) return;
+    DrawText(FString::Printf(TEXT("装備：%s　マウスホイール：装備切替"),
+        *Observer->GetSelectedToolName()),FColor::White,24,20);
+    DrawText(TEXT("TPS：W/S 前後　A/D 横歩き　Shift 走る　Space ジャンプ　PageUp/Down カメラ距離"),
+        FColor::White,24,44);
+    DrawText(Observer->GetEditStatus(),FColor::Yellow,24,68);
     if (Canvas != nullptr)
     {
         const float CenterX=Canvas->SizeX*0.5f;
@@ -411,6 +413,83 @@ void AAp5ObserverHUD::DrawHUD()
         DrawLine(CenterX,CenterY-Gap-Length,CenterX,CenterY-Gap,Foreground,InnerThickness);
         DrawLine(CenterX,CenterY+Gap,CenterX,CenterY+Gap+Length,Foreground,InnerThickness);
         DrawRect(FLinearColor::White,CenterX-1.0f,CenterY-1.0f,2.0f,2.0f);
+    }
+
+    // Minecraft風の8枠ホットバー。数字キーは使わず、ホイールだけで選択する。
+    if (Canvas!=nullptr)
+    {
+        constexpr float SlotSize=48.0f;
+        constexpr float SlotGap=6.0f;
+        constexpr int32 SlotCount=8;
+        const float TotalWidth=SlotCount*SlotSize+(SlotCount-1)*SlotGap;
+        const float StartX=(Canvas->SizeX-TotalWidth)*0.5f;
+        const float BarY=Canvas->SizeY-96.0f;
+
+        for (int32 Slot=0;Slot<SlotCount;++Slot)
+        {
+            const float X=StartX+Slot*(SlotSize+SlotGap);
+            DrawRect(FLinearColor(0.0f,0.0f,0.0f,0.68f),X,BarY,SlotSize,SlotSize);
+
+            const bool bSelected=Slot==Observer->GetSelectedHotbarIndex();
+            const FLinearColor Border=bSelected ? FLinearColor::Yellow : FLinearColor(0.7f,0.7f,0.7f,0.9f);
+            const float Thickness=bSelected ? 3.0f : 1.0f;
+            DrawLine(X,BarY,X+SlotSize,BarY,Border,Thickness);
+            DrawLine(X+SlotSize,BarY,X+SlotSize,BarY+SlotSize,Border,Thickness);
+            DrawLine(X+SlotSize,BarY+SlotSize,X,BarY+SlotSize,Border,Thickness);
+            DrawLine(X,BarY+SlotSize,X,BarY,Border,Thickness);
+
+            const float CX=X+SlotSize*0.5f;
+            const float CY=BarY+SlotSize*0.5f;
+            const FLinearColor Icon=FLinearColor::White;
+            switch (Slot)
+            {
+            case 0: // handgun
+                DrawRect(Icon,CX-15,CY-8,25,7);
+                DrawLine(CX+4,CY-1,CX-1,CY+12,Icon,4);
+                break;
+            case 1: // heavy gun
+                DrawRect(Icon,CX-18,CY-9,32,10);
+                DrawLine(CX+5,CY,CX,CY+14,Icon,5);
+                break;
+            case 2: // grenade launcher
+                DrawRect(Icon,CX-15,CY-6,28,9);
+                DrawRect(Icon,CX+8,CY-10,8,17);
+                DrawLine(CX-3,CY+2,CX-6,CY+13,Icon,4);
+                break;
+            case 3: // drill
+                DrawRect(Icon,CX-16,CY-6,20,12);
+                DrawLine(CX+4,CY-8,CX+17,CY,Icon,2);
+                DrawLine(CX+17,CY,CX+4,CY+8,Icon,2);
+                break;
+            case 4: // repair
+                DrawRect(Icon,CX-4,CY-15,8,30);
+                DrawRect(Icon,CX-15,CY-4,30,8);
+                break;
+            case 5: // cutter
+                DrawLine(CX-14,CY+14,CX+13,CY-13,Icon,5);
+                DrawLine(CX-16,CY+16,CX-8,CY+8,Icon,8);
+                break;
+            case 6: // join
+                DrawRect(Icon,CX-17,CY-7,11,14);
+                DrawRect(Icon,CX+6,CY-7,11,14);
+                DrawLine(CX-6,CY,CX+6,CY,Icon,4);
+                break;
+            case 7: // grab
+                DrawRect(Icon,CX-5,CY+2,10,11);
+                DrawLine(CX-5,CY+3,CX-14,CY-8,Icon,3);
+                DrawLine(CX,CY+2,CX,CY-13,Icon,3);
+                DrawLine(CX+5,CY+3,CX+14,CY-8,Icon,3);
+                break;
+            default:
+                break;
+            }
+        }
+
+        const FString ToolName=Observer->GetSelectedToolName();
+        float TextWidth=0.0f,TextHeight=0.0f;
+        GetTextSize(ToolName,TextWidth,TextHeight,nullptr,1.0f);
+        DrawText(ToolName,FColor::Yellow,
+            Canvas->SizeX*0.5f-TextWidth*0.5f,BarY+SlotSize+6.0f);
     }
     FVector2D JoinMarker;
     if (Observer->GetJoinMarker(JoinMarker))
