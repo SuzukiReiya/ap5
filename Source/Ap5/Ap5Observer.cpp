@@ -125,6 +125,12 @@ void AAp5Observer::PlayerTick(float DeltaTime)
     ViewRotation.Roll=0.0f;
     SetControlRotation(ViewRotation);
 
+    // 移動方向とは独立に、身体のYawと銃口Pitchを常にクロスヘア方向へ固定する。
+    // A/D/Sでストレイフ・後退しても見た目と射出口の向きは変えない。
+    PlayerCharacter->SetActorRotation(
+        FRotator(0.0f,ViewRotation.Yaw,0.0f),ETeleportType::None);
+    PlayerCharacter->SetAimPitch(ViewRotation.Pitch);
+
     // TPS移動はカメラYaw基準。上下視点角は移動方向へ混ぜない。
     const FRotator MoveRotation(0.0f,ViewRotation.Yaw,0.0f);
     const FVector HorizontalForward=MoveRotation.Vector();
@@ -378,7 +384,7 @@ void AAp5ObserverHUD::DrawHUD()
         Observer->IsProjectileMode() ? TEXT("実体弾") : (Observer->IsGrabMode() ? TEXT("把持") : (Observer->IsBlastMode() ? TEXT("爆発弾") : (Observer->IsJoinMode() ? TEXT("接合") : (Observer->IsImpactMode() ? TEXT("弾痕") : (Observer->IsCutMode() ? TEXT("切断") : (Observer->IsRepairMode() ? TEXT("修復") : TEXT("穴あけ"))))))),
         DisplayRadius), FColor::White, 24, 20);
     DrawText(TEXT("3：細い　4：標準　5：太い　M：材質差　K：構造強度　9：右腕関節　L：簡易歩行　Backspace：リセット"), FColor::White, 24, 44);
-    DrawText(TEXT("TPS：マウス視点　WASD：移動　Shift：走る　Space：ジャンプ　ホイール：カメラ距離　R：視点を戻す"), FColor::White, 24, 68);
+    DrawText(TEXT("TPS：クロスヘア正面固定　W/S：前後　A/D：横歩き　Shift：走る　Space：ジャンプ　ホイール：距離"), FColor::White, 24, 68);
     DrawText(Observer->GetEditStatus(), FColor::Yellow, 24, 92);
     DrawText(TEXT("つながりを削り切ると分離・落下。本体・破片とも加工可能。修復は直近の分離・接合時の形まで。"), FColor::White, 24, 116);
     if (Canvas != nullptr)
