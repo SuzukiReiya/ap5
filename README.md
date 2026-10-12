@@ -146,6 +146,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Scripts\BuildAndRun.ps
 初回はシェーダーコンパイルなどで時間がかかります。完了するまで待ってください。
 再ビルド前に前のゲームやUEエディタを終了してください（DLLが使用中だとリンクに失敗します）。
 
+同じPCでself-hosted GitHub ActionsのUEビルドとローカルビルドが重なると、runnerの `NetworkService` と対話ユーザーでUBTの `Global\\UnrealBuildTool_Mutex_*` のACLが異なるため、`-WaitMutex` でも `UnauthorizedAccessException` になる場合があります。`BuildAndRun.ps1` はこの特定のMutex競合だけを最大5分、10秒間隔で自動リトライします。通常のコンパイルエラーはリトライしません。
+
 **この起動は開発用のStandalone Gameです。配布用exeではなく、UE本体を使用します。**
 低負荷から始めるためDX11、Lumenなし、Naniteなし、レイトレーシングなし、60fps上限です。
 低スペックPC上の性能を保証するものではなく、対象機での計測が必要です。
