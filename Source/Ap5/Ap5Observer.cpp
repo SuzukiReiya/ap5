@@ -12,6 +12,11 @@
 #include "InputCoreTypes.h"
 #include "Kismet/KismetSystemLibrary.h"
 
+namespace
+{
+constexpr float CrosshairVerticalRatio=0.40f;
+}
+
 AAp5Observer::AAp5Observer()
 {
     bAutoManageActiveCameraTarget=true;
@@ -126,8 +131,20 @@ bool AAp5Observer::GetAimRay(FVector& Start,FVector& Direction) const
 {
     if (!IsValid(PlayerCharacter) || !IsValid(PlayerCharacter->GetFollowCamera()))
         return false;
-    Start=PlayerCharacter->GetFollowCamera()->GetComponentLocation();
-    Direction=PlayerCharacter->GetFollowCamera()->GetForwardVector().GetSafeNormal();
+
+    int32 ViewX=0,ViewY=0;
+    GetViewportSize(ViewX,ViewY);
+    if (ViewX<=0 || ViewY<=0) return false;
+
+    // EDF系TPSを意識し、画面中央より少し上のクロスヘア位置そのものを逆投影する。
+    // 射撃・穴あけ・修復・把持など、全ツールがHUD表示と同じ射線を共有する。
+    const float CrosshairX=static_cast<float>(ViewX)*0.5f;
+    const float CrosshairY=static_cast<float>(ViewY)*CrosshairVerticalRatio;
+    if (!DeprojectScreenPositionToWorld(
+        CrosshairX,CrosshairY,Start,Direction))
+        return false;
+
+    Direction=Direction.GetSafeNormal();
     return !Direction.IsNearlyZero();
 }
 
@@ -137,7 +154,7 @@ bool AAp5Observer::FireProjectile(bool bExplosive)
     if (!GetAimRay(CameraStart,CameraDirection) || !IsValid(PlayerCharacter))
         return false;
 
-    // まず画面中央クロスヘアの照準点をカメラから求める。
+    // まず画面上側のクロスヘア位置から照準点を求める。
     // 弾そのものは右手から照準点へ向けて発射するため、肩越し視点でも狙いと弾道が一致する。
     constexpr float AimDistanceCm=10000.0f;
     FVector AimPoint=CameraStart+CameraDirection*AimDistanceCm;
@@ -209,7 +226,10 @@ void AAp5Observer::PlayerTick(float DeltaTime)
     // A/D/Sでストレイフ・後退しても見た目と射出口の向きは変えない。
     PlayerCharacter->SetActorRotation(
         FRotator(0.0f,ViewRotation.Yaw,0.0f),ETeleportType::None);
-    PlayerCharacter->SetAimPitch(ViewRotation.Pitch);
+    FVector AimStartForVisual,AimDirectionForVisual;
+    const float WeaponPitch=GetAimRay(AimStartForVisual,AimDirectionForVisual)
+        ? AimDirectionForVisual.Rotation().Pitch : ViewRotation.Pitch;
+    PlayerCharacter->SetAimPitch(WeaponPitch);
 
     // TPS移動はカメラYaw基準。上下視点角は移動方向へ混ぜない。
     const FRotator MoveRotation(0.0f,ViewRotation.Yaw,0.0f);
@@ -338,7 +358,8 @@ void AAp5Observer::PlayerTick(float DeltaTime)
         {
             int32 ViewX=0,ViewY=0;
             GetViewportSize(ViewX,ViewY);
-            CutStart=CutEnd=FVector2D(ViewX*0.5f,ViewY*0.5f);
+            CutStart=CutEnd=FVector2D(
+                ViewX*0.5f,ViewY*CrosshairVerticalRatio);
             bDrawingCut=true;
             return;
         }
@@ -394,9 +415,9 @@ void AAp5ObserverHUD::DrawHUD()
     if (Canvas != nullptr)
     {
         const float CenterX=Canvas->SizeX*0.5f;
-        const float CenterY=Canvas->SizeY*0.5f;
+        const float CenterY=Canvas->SizeY*CrosshairVerticalRatio;
 
-        // 肩越しTPSでも狙い位置が明確になる常時クロスヘア。
+        // EDF系TPSを意識し、プレイヤー頭上付近へ置いた常時クロスヘア。
         // 黒い太線を下地にしてから白線を重ね、明るい背景でも見失いにくくする。
         const float Gap=5.0f;
         const float Length=10.0f;
