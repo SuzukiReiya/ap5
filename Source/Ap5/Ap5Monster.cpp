@@ -1149,7 +1149,10 @@ void AAp5Monster::UpdateLegMotion(float DeltaSeconds)
         FTransform WalkTransform=LegMotionOriginTransform;
         const FVector RotatedContact=
             LegMotionOriginTransform.TransformVectorNoScale(SupportContactLocal);
-        const FVector DesiredLocation=LegSupportAnchorWorld-RotatedContact;
+        FVector DesiredLocation=LegSupportAnchorWorld-RotatedContact;
+        // 支持足固定は水平成分だけに使う。脚関節の上下運動をActor全体のZへ
+        // 反映すると、歩行中に胴体全体が毎フレーム上下してガタつく。
+        DesiredLocation.Z=LegMotionOriginTransform.GetLocation().Z;
         WalkTransform.SetLocation(DesiredLocation);
         SetActorTransform(WalkTransform,false,nullptr,ETeleportType::TeleportPhysics);
 
