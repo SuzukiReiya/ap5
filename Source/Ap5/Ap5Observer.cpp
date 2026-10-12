@@ -208,6 +208,13 @@ void AAp5Observer::PlayerTick(float DeltaTime)
             ? TEXT("材質差ON：弾痕7で比較。腕・脚=標準、胴体=硬質x2、頭=硬質x4。")
             : TEXT("材質差OFF：弾痕は全身とも標準深さ8 cmです。");
     }
+    if (WasInputKeyJustPressed(EKeys::K))
+    {
+        const bool bEnabled=TestMonster->ToggleStructuralStrengthTest();
+        EditStatus=bEnabled
+            ? TEXT("構造強度ON：細い接続部は自己荷重で破断します。肩などを削って確認してください。")
+            : TEXT("構造強度OFF：完全に非連結になるまで形状だけでは分離しません。");
+    }
     if (!bGrabMode) TestMonster->EndGrab();
     if (WasInputKeyJustPressed(EKeys::Nine))
     {
@@ -374,7 +381,7 @@ void AAp5ObserverHUD::DrawHUD()
     DrawText(FString::Printf(TEXT("%s　半径 %.0f cm　P：実体弾　0：爆発弾　G：把持　7：弾痕　1：穴　2：修復　6：切断　8：接合"),
         Observer->IsProjectileMode() ? TEXT("実体弾") : (Observer->IsGrabMode() ? TEXT("把持") : (Observer->IsBlastMode() ? TEXT("爆発弾") : (Observer->IsJoinMode() ? TEXT("接合") : (Observer->IsImpactMode() ? TEXT("弾痕") : (Observer->IsCutMode() ? TEXT("切断") : (Observer->IsRepairMode() ? TEXT("修復") : TEXT("穴あけ"))))))),
         DisplayRadius), FColor::White, 24, 20);
-    DrawText(TEXT("3：細い　4：標準　5：太い　M：材質差　9：右腕関節　L：簡易歩行　Backspace：リセット"), FColor::White, 24, 44);
+    DrawText(TEXT("3：細い　4：標準　5：太い　M：材質差　K：構造強度　9：右腕関節　L：簡易歩行　Backspace：リセット"), FColor::White, 24, 44);
     DrawText(TEXT("マウス：視点　WASD：移動　Shift：高速　ホイール／PageUp・Down：前後　R：視点を戻す"), FColor::White, 24, 68);
     DrawText(Observer->GetEditStatus(), FColor::Yellow, 24, 92);
     DrawText(TEXT("つながりを削り切ると分離・落下。本体・破片とも加工可能。修復は直近の分離・接合時の形まで。"), FColor::White, 24, 116);
