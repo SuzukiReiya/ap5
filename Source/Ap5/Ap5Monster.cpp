@@ -780,6 +780,8 @@ bool AAp5Monster::ToggleArmMotionTest()
         LegMotionTime=0.0f;
         LegWalkDistance=0.0f;
         bLegWalkBlocked=false;
+        bLegSupportAnchorValid=false;
+        LegWalkVelocityWorld=FVector::ZeroVector;
     }
     ArmMotionTime=0.0f;
     ResetShape();
@@ -787,23 +789,33 @@ bool AAp5Monster::ToggleArmMotionTest()
     return bArmMotionTest;
 }
 
-bool AAp5Monster::IsDrivenFootGrounded(int32 DriveId) const
+bool AAp5Monster::GetDrivenFootContactLocal(int32 DriveId,FVector& ContactLocal) const
 {
-    constexpr double FloorZ=0.0;
-    constexpr double ContactToleranceCm=8.0;
+    FVector Sum=FVector::ZeroVector;
+    int32 Count=0;
     for (const Ap5Volume::Piece& State : Pieces.Items)
     {
         if (!State.Driven || State.DriveId!=DriveId) continue;
         for (const Ap5Volume::Point& Support : State.GroundSupportPoints)
         {
-            // 足裏点そのものが削られていれば支持には使わない。
             if (State.Volume.Sample(Support)>=0) continue;
-            const FVector World=GetActorTransform().TransformPosition(
-                EnginePoint(State.ToWorld(Support)));
-            if (World.Z<=FloorZ+ContactToleranceCm) return true;
+            Sum+=EnginePoint(State.ToWorld(Support));
+            ++Count;
         }
     }
-    return false;
+    if (Count<=0) return false;
+    ContactLocal=Sum/static_cast<float>(Count);
+    return true;
+}
+
+bool AAp5Monster::IsDrivenFootGrounded(int32 DriveId) const
+{
+    constexpr double FloorZ=0.0;
+    constexpr double ContactToleranceCm=8.0;
+    FVector ContactLocal;
+    if (!GetDrivenFootContactLocal(DriveId,ContactLocal)) return false;
+    const FVector World=GetActorTransform().TransformPosition(ContactLocal);
+    return World.Z<=FloorZ+ContactToleranceCm;
 }
 
 void AAp5Monster::DestroyCollapseConstraints()
@@ -976,9 +988,12 @@ void AAp5Monster::CollapseWalkingBody(int32 FailedSupportDriveId)
 
     // モデル正面は-X、左右はY。左支持喪失なら-Y側、右なら+Y側へ倒す。
     const double TipAngularSpeed=FailedSupportDriveId==3 ? 1.1 : -1.1;
-    constexpr double ForwardSpeedCmPerSecond=42.0;
+    FVector LocalWalkVelocity=GetActorTransform().InverseTransformVectorNoScale(
+        LegWalkVelocityWorld);
+    if (LocalWalkVelocity.IsNearlyZero())
+        LocalWalkVelocity=FVector(-42.0f,0.0f,0.0f);
     Pieces.ReleaseAllForPhysics(
-        Ap5Volume::Point(-ForwardSpeedCmPerSecond,0,0),
+        VolumePoint(LocalWalkVelocity),
         Ap5Volume::Point(TipAngularSpeed,0,0));
 
     bLegMotionTest=false;
@@ -1031,65 +1046,19 @@ void AAp5Monster::UpdateLegMotion(float DeltaSeconds)
     const float Frequency=2.0f*PI/1.8f;
     const float Phase=LegMotionTime*Frequency;
     const float Swing=FMath::Sin(Phase);
-
-    // Swing>0では右脚、Swing<=0では左脚を接地脚とする。
-    // 位相だけで決めず、対応する足裏材料が実際に床付近へ残っていることを確認する。
-    const int32 SupportDriveId=Swing>0.0f ? 4 : 3;
-    const bool bSupportGrounded=IsDrivenFootGrounded(SupportDriveId);
-    if (SupportDriveId!=ActiveSupportDriveId)
-    {
-        ActiveSupportDriveId=SupportDriveId;
-        UE_LOG(LogTemp, Display, TEXT("AP5_WALK_SUPPORT: side=%s grounded=%d"),
-            SupportDriveId==3 ? TEXT("left") : TEXT("right"),bSupportGrounded ? 1 : 0);
-    }
-
-    if (bSupportGrounded) LegSupportLossSeconds=0.0f;
-    else LegSupportLossSeconds+=SafeDelta;
-
-    // 位相切替の瞬間的な離地を誤検知しないよう120msだけ猶予する。
-    constexpr float SupportLossGraceSeconds=0.12f;
-    const bool bCanAdvance=bSupportGrounded || LegSupportLossSeconds<SupportLossGraceSeconds;
-    if (bCanAdvance)
-    {
-        constexpr float WalkSpeedCmPerSecond=42.0f;
-        LegWalkDistance+=WalkSpeedCmPerSecond*SafeDelta;
-    }
-
-    const bool bBlockedNow=LegSupportLossSeconds>=SupportLossGraceSeconds;
-    if (bLegWalkBlocked!=bBlockedNow)
-    {
-        bLegWalkBlocked=bBlockedNow;
-        UE_LOG(LogTemp, Display,
-            TEXT("AP5_WALK_BLOCKED: blocked=%d support=%s distance_cm=%.1f"),
-            bLegWalkBlocked ? 1 : 0,SupportDriveId==3 ? TEXT("left") : TEXT("right"),
-            LegWalkDistance);
-    }
-
-    // 短い接地抜けでは停止だけに留め、350ms以上支持が戻らなければ物理転倒へ移行する。
-    constexpr float CollapseDelaySeconds=0.35f;
-    if (LegSupportLossSeconds>=CollapseDelaySeconds)
-    {
-        CollapseWalkingBody(SupportDriveId);
-        return;
-    }
-
     const float SwingSpeed=Frequency*FMath::Cos(Phase);
+    const float SupportPhase=FMath::Cos(Phase);
 
-    // モデル正面は-X。接地脚と遊脚を半周期ごとに切り替えつつ本体を前へ送る。
-    // 上下動は小さくし、歩行確認中も照準しやすくする。
-    const float BodyBob=1.5f*(1.0f-FMath::Cos(Phase*2.0f));
-    const float BodySway=2.5f*Swing;
-    const FVector LocalWalkOffset(-LegWalkDistance,BodySway,BodyBob);
-    FTransform WalkTransform=LegMotionOriginTransform;
-    WalkTransform.SetLocation(
-        LegMotionOriginTransform.GetLocation()
-        +LegMotionOriginTransform.TransformVectorNoScale(LocalWalkOffset));
-    SetActorTransform(WalkTransform,false,nullptr,ETeleportType::TeleportPhysics);
+    // 支持脚は股関節角が前→後へ単調に掃引する半周期を使う。
+    // cos>0: 右支持、cos<=0: 左支持。
+    const int32 SupportDriveId=SupportPhase>0.0f ? 4 : 3;
+    const bool bSupportChanged=SupportDriveId!=ActiveSupportDriveId;
 
+    // 先に関節姿勢だけ更新する。Actor移動はこの後、支持足を床へ固定するように決める。
     for (int32 I=0;I<static_cast<int32>(Pieces.Items.size());++I)
     {
         Ap5Volume::Piece& State=Pieces.Items[I];
-        if (!State.Driven || !State.Fixed || !PieceMeshes.IsValidIndex(I)) continue;
+        if (!State.Driven || !State.Fixed) continue;
 
         const bool bLeftThigh=State.DriveId==1;
         const bool bRightThigh=State.DriveId==2;
@@ -1098,11 +1067,12 @@ void AAp5Monster::UpdateLegMotion(float DeltaSeconds)
         if (!bLeftThigh && !bRightThigh && !bLeftLower && !bRightLower) continue;
 
         const bool bLeft=bLeftThigh || bLeftLower;
+        const bool bSupportLeg=(bLeft && SupportDriveId==3)
+            || (!bLeft && SupportDriveId==4);
         const float SideSign=bLeft ? 1.0f : -1.0f;
         const float LegSwing=Swing*SideSign;
         const float LegSwingSpeed=SwingSpeed*SideSign;
 
-        // 正側を遊脚、負側を接地脚として扱う。接地側はほぼ伸ばしたまま後方へ送る。
         const float HipDegrees=20.0f*LegSwing;
         const float HipSpeedDegrees=20.0f*LegSwingSpeed;
         const float HipAngle=FMath::DegreesToRadians(HipDegrees);
@@ -1120,9 +1090,11 @@ void AAp5Monster::UpdateLegMotion(float DeltaSeconds)
 
         if (bLeftLower || bRightLower)
         {
-            const float SwingLift=FMath::Max(0.0f,LegSwing);
+            // 遊脚の前半だけ膝を曲げ、着地前には伸ばす。支持脚の膝は伸ばしたまま。
+            const float SwingLift=bSupportLeg ? 0.0f : FMath::Max(0.0f,-LegSwing);
             const float KneeDegrees=-36.0f*SwingLift;
-            const float KneeSpeedDegrees=LegSwing>0.0f ? -36.0f*LegSwingSpeed : 0.0f;
+            const float KneeSpeedDegrees=(!bSupportLeg && LegSwing<0.0f)
+                ? 36.0f*LegSwingSpeed : 0.0f;
             const float KneeAngle=FMath::DegreesToRadians(KneeDegrees);
             const float KneeAngularSpeed=FMath::DegreesToRadians(KneeSpeedDegrees);
             const FVector KneePivot=FVector(0.0f,bLeft ? -36.0f : 36.0f,66.0f);
@@ -1143,10 +1115,92 @@ void AAp5Monster::UpdateLegMotion(float DeltaSeconds)
         State.Translation=VolumePoint(Translation);
         State.OriginVelocity=VolumePoint(OriginVelocity);
         State.AngularVelocity=VolumePoint(Omega);
+    }
 
-        const FTransform LocalTransform(Rotation,Translation);
+    FVector SupportContactLocal;
+    const bool bHasSupportMaterial=
+        GetDrivenFootContactLocal(SupportDriveId,SupportContactLocal);
+
+    // 支持切替時は新しい足の現在位置を接地点として採用し、床面Z=0へ固定する。
+    if (bSupportChanged || !bLegSupportAnchorValid)
+    {
+        bLegSupportAnchorValid=false;
+        if (bHasSupportMaterial)
+        {
+            const FVector CandidateWorld=
+                GetActorTransform().TransformPosition(SupportContactLocal);
+            constexpr float ContactAcquireToleranceCm=12.0f;
+            if (CandidateWorld.Z<=ContactAcquireToleranceCm)
+            {
+                LegSupportAnchorWorld=CandidateWorld;
+                LegSupportAnchorWorld.Z=0.0f;
+                bLegSupportAnchorValid=true;
+            }
+        }
+        ActiveSupportDriveId=SupportDriveId;
+        UE_LOG(LogTemp, Display, TEXT("AP5_WALK_SUPPORT: side=%s acquired=%d"),
+            SupportDriveId==3 ? TEXT("left") : TEXT("right"),
+            bLegSupportAnchorValid ? 1 : 0);
+    }
+
+    const FVector PreviousActorLocation=GetActorLocation();
+    if (bLegSupportAnchorValid && bHasSupportMaterial)
+    {
+        FTransform WalkTransform=LegMotionOriginTransform;
+        const FVector RotatedContact=
+            LegMotionOriginTransform.TransformVectorNoScale(SupportContactLocal);
+        const FVector DesiredLocation=LegSupportAnchorWorld-RotatedContact;
+        WalkTransform.SetLocation(DesiredLocation);
+        SetActorTransform(WalkTransform,false,nullptr,ETeleportType::TeleportPhysics);
+
+        if (SafeDelta>1.0e-5f)
+            LegWalkVelocityWorld=(DesiredLocation-PreviousActorLocation)/SafeDelta;
+
+        const FVector LocalOffset=LegMotionOriginTransform.InverseTransformVectorNoScale(
+            DesiredLocation-LegMotionOriginTransform.GetLocation());
+        LegWalkDistance=FMath::Max(0.0f,-LocalOffset.X);
+    }
+    else
+    {
+        LegWalkVelocityWorld=FVector::ZeroVector;
+    }
+
+    // Actor位置を確定した後で各関節PieceのWorldTransformを反映する。
+    for (int32 I=0;I<static_cast<int32>(Pieces.Items.size());++I)
+    {
+        const Ap5Volume::Piece& State=Pieces.Items[I];
+        if (!State.Driven || !State.Fixed || !PieceMeshes.IsValidIndex(I)) continue;
+        if (State.DriveId<1 || State.DriveId>4) continue;
+
+        const FQuat Rotation=FRotationMatrix::MakeFromXY(
+            EnginePoint(State.AxisX),EnginePoint(State.AxisY)).ToQuat();
+        const FTransform LocalTransform(
+            Rotation,EnginePoint(State.ToWorld(Ap5Volume::Point())));
         PieceMeshes[I]->SetWorldTransform(
             LocalTransform*GetActorTransform(),false,nullptr,ETeleportType::TeleportPhysics);
+    }
+
+    const bool bSupportGrounded=bLegSupportAnchorValid
+        && bHasSupportMaterial && IsDrivenFootGrounded(SupportDriveId);
+    if (bSupportGrounded) LegSupportLossSeconds=0.0f;
+    else LegSupportLossSeconds+=SafeDelta;
+
+    constexpr float SupportLossGraceSeconds=0.12f;
+    const bool bBlockedNow=LegSupportLossSeconds>=SupportLossGraceSeconds;
+    if (bLegWalkBlocked!=bBlockedNow)
+    {
+        bLegWalkBlocked=bBlockedNow;
+        UE_LOG(LogTemp, Display,
+            TEXT("AP5_WALK_BLOCKED: blocked=%d support=%s distance_cm=%.1f"),
+            bLegWalkBlocked ? 1 : 0,SupportDriveId==3 ? TEXT("left") : TEXT("right"),
+            LegWalkDistance);
+    }
+
+    constexpr float CollapseDelaySeconds=0.35f;
+    if (LegSupportLossSeconds>=CollapseDelaySeconds)
+    {
+        CollapseWalkingBody(SupportDriveId);
+        return;
     }
 }
 
@@ -1169,6 +1223,9 @@ bool AAp5Monster::ToggleLegMotionTest()
     bLegWalkBlocked=false;
     ActiveSupportDriveId=INDEX_NONE;
     LegSupportLossSeconds=0.0f;
+    bLegSupportAnchorValid=false;
+    LegSupportAnchorWorld=FVector::ZeroVector;
+    LegWalkVelocityWorld=FVector::ZeroVector;
     ResetShape();
     UE_LOG(LogTemp, Display, TEXT("AP5_LEG_MOTION: enabled=%d walking=1"),
         bLegMotionTest ? 1 : 0);
@@ -1261,6 +1318,9 @@ void AAp5Monster::ResetShape()
     bLegWalkBlocked=false;
     ActiveSupportDriveId=INDEX_NONE;
     LegSupportLossSeconds=0.0f;
+    bLegSupportAnchorValid=false;
+    LegSupportAnchorWorld=FVector::ZeroVector;
+    LegWalkVelocityWorld=FVector::ZeroVector;
     UpdateArmMotion(0.0f);
     UpdateLegMotion(0.0f);
     SetActorTickEnabled(bArmMotionTest || bLegMotionTest);
