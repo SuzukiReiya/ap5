@@ -76,7 +76,8 @@ void AAp5GameMode::StartPlay()
     UStaticMeshComponent* FloorComponent = Floor->GetStaticMeshComponent();
     FloorComponent->SetMobility(EComponentMobility::Movable);
     FloorComponent->SetStaticMesh(FloorMesh);
-    FloorComponent->SetWorldScale3D(FVector(12.0, 12.0, 0.2));
+    // 12m角ではTPS移動と戦闘検証には狭いため、50m角まで拡張する。
+    FloorComponent->SetWorldScale3D(FVector(50.0,50.0,0.2));
     FloorComponent->SetCollisionProfileName(TEXT("BlockAll"));
     // 歩行支持はECC_WorldStaticへの下向きTraceで検出する。
     FloorComponent->SetCollisionObjectType(ECC_WorldStatic);
