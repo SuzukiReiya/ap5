@@ -729,6 +729,15 @@ int main()
         ++DriveCount[Scene.Items[I].DriveId];
     }
     for (int I=1;I<=4;++I) assert(DriveCount[I]==1);
+    assert(Scene.Items[0].StructureId==0);
+    for (size_t I=1;I<Scene.Items.size();++I)
+        assert(Scene.Items[I].StructureId==Scene.Items[I].DriveId);
+
+    // 関節残存判定は単一点ではなく15cm球内の材料サンプル数を使う。
+    const int JointSamplesBefore=
+        Scene.Items[1].Volume.MaterialSamplesNear(
+            Point(0,-32,72),15);
+    assert(JointSamplesBefore>3);
 
     // 下腿だけが足裏支持点を保持し、支持点は現在の材料に含まれている。
     for (size_t I=1;I<Scene.Items.size();++I)
@@ -771,6 +780,7 @@ int main()
     for (const Ap5Volume::Piece& P : Scene.Items)
     {
         assert(!P.Fixed && !P.Driven && P.DriveId==-1 && P.ParentDriveId==-1);
+        assert(P.StructureId>=0 && P.StructureId<=4);
         assert(P.OriginVelocity.X==-42);
         assert(P.AngularVelocity.X==1.1);
     }
