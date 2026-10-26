@@ -5,7 +5,9 @@ permissions:
 jobs:
   volume:
     name: 体積演算の検証（UE不要）
-    runs-on: ubuntu-latest
+    # ubuntu-latestのOS世代更新で浮動小数点依存の閉曲面テスト結果が変わらないよう固定する。
+    # Ubuntu 26.04対応は別途テストしてから更新する。
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
