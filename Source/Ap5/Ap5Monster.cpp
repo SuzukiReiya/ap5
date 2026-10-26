@@ -9,7 +9,9 @@
 #include "Materials/Material.h"
 #include "HAL/PlatformTime.h"
 #include "PhysicsEngine/AggregateGeom.h"
+#include "PhysicsEngine/SphylElem.h"
 #include "PhysicsEngine/PhysicsHandleComponent.h"
+#include "CollisionQueryParams.h"
 #include "PhysicsEngine/PhysicsConstraintComponent.h"
 #include "Math/RotationMatrix.h"
 #include "Engine/World.h"
@@ -21,6 +23,41 @@ Ap5Volume::Point VolumePoint(const FVector& P) { return Ap5Volume::Point(P.X,P.Y
 FVector EnginePoint(const Ap5Volume::Point& P) { return FVector(P.X,P.Y,P.Z); }
 
 constexpr double RenderChunkSizeCm = 100.0;
+constexpr double CapsuleMinimumRemainingFraction = 0.85;
+
+bool IsCapsuleStructure(int32 StructureId)
+{
+    // 右腕と大腿は細長く、Z軸Capsuleで近似しやすい。
+    // 下腿は足部を含むためBox群を維持する。
+    return StructureId==1 || StructureId==2 || StructureId==5;
+}
+
+bool BuildCapsuleCollision(const Ap5Volume::Piece& State,FKSphylElem& Capsule)
+{
+    if (!IsCapsuleStructure(State.StructureId)
+        || State.InitialMaterialSamples<=0
+        || State.Volume.MaterialCount()<
+            static_cast<int>(State.InitialMaterialSamples*CapsuleMinimumRemainingFraction))
+        return false;
+
+    Ap5Volume::Point Low,High;
+    if (!State.Volume.MaterialBounds(Low,High)) return false;
+    const Ap5Volume::Point Size=High-Low;
+    const double CrossSection=std::min(Size.X,Size.Y);
+    if (CrossSection<=1.0 || Size.Z<CrossSection*1.35) return false;
+
+    // AABBいっぱいにはせず、破壊表面より外へ張り出しにくい保守的な内接近似とする。
+    const float Radius=static_cast<float>(CrossSection*0.35);
+    const float TotalLength=static_cast<float>(Size.Z*0.90);
+    const float SegmentLength=FMath::Max(0.0f,TotalLength-2.0f*Radius);
+    if (Radius<1.0f || SegmentLength<1.0f) return false;
+
+    Capsule.Center=EnginePoint((Low+High)*0.5);
+    Capsule.Radius=Radius;
+    Capsule.Length=SegmentLength;
+    Capsule.Rotation=FRotator::ZeroRotator;
+    return true;
+}
 
 }
 
@@ -123,7 +160,8 @@ UDynamicMeshComponent* AAp5Monster::CreatePiece()
     Piece->SetLinearDamping(0.15f);
     Piece->SetAngularDamping(0.5f);
     Piece->RegisterComponent();
-    Piece->SetUseCCD(true, NAME_None);
+    // 固定・駆動中はCCD不要。自由剛体へ切り替わった時点で有効化する。
+    Piece->SetUseCCD(false, NAME_None);
     return Piece;
 }
 
@@ -177,17 +215,30 @@ void AAp5Monster::RebuildMesh(int32 Index)
 
     FKAggregateGeom Collision;
     std::vector<Ap5Volume::CollisionBox> Boxes;
+    bool bUsingCapsule=false;
+    bool bHasCollision=false;
     {
         FAp5ProfileScope Profile(EAp5ProfileProcess::CollisionBoxes);
-        Boxes = State.Volume.CollisionBoxes();
-        for (const Ap5Volume::CollisionBox& Box : Boxes)
+        FKSphylElem Capsule;
+        if (BuildCapsuleCollision(State,Capsule))
         {
-            FKBoxElem Element;
-            Element.Center = EnginePoint(Box.Center);
-            Element.X = static_cast<float>(Box.Size.X);
-            Element.Y = static_cast<float>(Box.Size.Y);
-            Element.Z = static_cast<float>(Box.Size.Z);
-            Collision.BoxElems.Add(Element);
+            Collision.SphylElems.Add(Capsule);
+            bUsingCapsule=true;
+            bHasCollision=true;
+        }
+        else
+        {
+            Boxes=State.Volume.CollisionBoxes();
+            for (const Ap5Volume::CollisionBox& Box : Boxes)
+            {
+                FKBoxElem Element;
+                Element.Center=EnginePoint(Box.Center);
+                Element.X=static_cast<float>(Box.Size.X);
+                Element.Y=static_cast<float>(Box.Size.Y);
+                Element.Z=static_cast<float>(Box.Size.Z);
+                Collision.BoxElems.Add(Element);
+            }
+            bHasCollision=!Boxes.empty();
         }
     }
 
@@ -199,7 +250,7 @@ void AAp5Monster::RebuildMesh(int32 Index)
 
     {
         FAp5ProfileScope Profile(EAp5ProfileProcess::PhysicsCollisionState);
-        if (Boxes.empty())
+        if (!bHasCollision)
         {
             if (Component->GetCollisionEnabled()!=ECollisionEnabled::NoCollision)
                 Component->SetCollisionEnabled(ECollisionEnabled::NoCollision);
@@ -215,12 +266,19 @@ void AAp5Monster::RebuildMesh(int32 Index)
         }
     }
 
-    const bool bShouldSimulate=!Boxes.empty() && !State.Fixed;
+    const bool bShouldSimulate=bHasCollision && !State.Fixed;
     if (Component->IsSimulatingPhysics()!=bShouldSimulate)
     {
         FAp5ProfileScope Profile(EAp5ProfileProcess::PhysicsSimulationToggle);
         Component->SetSimulatePhysics(bShouldSimulate);
     }
+    // CCDは動く自由剛体だけに限定する。駆動中は別途経路Overlap判定を行う。
+    Component->SetUseCCD(bShouldSimulate,NAME_None);
+
+    UE_LOG(LogTemp,Verbose,
+        TEXT("AP5_COLLISION_PRIMITIVE: piece=%d structure=%d mode=%s boxes=%d remaining=%d/%d"),
+        Index,State.StructureId,bUsingCapsule ? TEXT("capsule") : TEXT("boxes"),
+        static_cast<int32>(Boxes.size()),State.Volume.MaterialCount(),State.InitialMaterialSamples);
 
     if (bShouldSimulate)
     {
@@ -757,6 +815,84 @@ void AAp5Monster::SyncPhysicsState()
     }
 }
 
+bool AAp5Monster::TrySetDrivenPieceTransform(
+    UDynamicMeshComponent* Component,const FTransform& TargetWorld,const TCHAR* Context)
+{
+    if (!IsValid(Component)) return false;
+    UWorld* World=GetWorld();
+    if (World==nullptr || Component->GetCollisionEnabled()==ECollisionEnabled::NoCollision)
+    {
+        Component->SetWorldTransform(
+            TargetWorld,false,nullptr,ETeleportType::TeleportPhysics);
+        return true;
+    }
+
+    FAp5ProfileScope Profile(EAp5ProfileProcess::KinematicSweep);
+    const FTransform CurrentWorld=Component->GetComponentTransform();
+    const FVector Start=CurrentWorld.GetLocation();
+    const FVector End=TargetWorld.GetLocation();
+    const FQuat StartRotation=CurrentWorld.GetRotation();
+    const FQuat EndRotation=TargetWorld.GetRotation();
+
+    FComponentQueryParams QueryParams;
+    QueryParams.TraceTag=TEXT("Ap5DrivenSweep");
+    QueryParams.AddIgnoredActor(this);
+    const FCollisionObjectQueryParams ObjectParams(
+        FCollisionObjectQueryParams::AllObjects);
+
+    // 支持足など、移動開始時から接触している相手は許容し、
+    // 経路途中で新しく発生したblocking overlapだけを障害物として扱う。
+    TSet<const UPrimitiveComponent*> InitialBlocking;
+    TArray<FOverlapResult> InitialOverlaps;
+    World->ComponentOverlapMultiByChannel(
+        InitialOverlaps,Component,Start,StartRotation,
+        Component->GetCollisionObjectType(),QueryParams,ObjectParams);
+    for (const FOverlapResult& Overlap : InitialOverlaps)
+    {
+        UPrimitiveComponent* Other=Overlap.Component.Get();
+        if (!IsValid(Other)) continue;
+        const bool bBlocks=
+            Component->GetCollisionResponseToChannel(Other->GetCollisionObjectType())==ECR_Block
+            && Other->GetCollisionResponseToChannel(Component->GetCollisionObjectType())==ECR_Block;
+        if (bBlocks) InitialBlocking.Add(Other);
+    }
+
+    const float Distance=FVector::Distance(Start,End);
+    const float AngleDegrees=FMath::RadiansToDegrees(StartRotation.AngularDistance(EndRotation));
+    const int32 Steps=FMath::Clamp(
+        FMath::CeilToInt(FMath::Max(Distance/5.0f,AngleDegrees/5.0f)),1,12);
+
+    for (int32 Step=1;Step<=Steps;++Step)
+    {
+        const float Alpha=static_cast<float>(Step)/static_cast<float>(Steps);
+        const FVector Position=FMath::Lerp(Start,End,Alpha);
+        const FQuat Rotation=FQuat::Slerp(StartRotation,EndRotation,Alpha).GetNormalized();
+        TArray<FOverlapResult> Overlaps;
+        World->ComponentOverlapMultiByChannel(
+            Overlaps,Component,Position,Rotation,
+            Component->GetCollisionObjectType(),QueryParams,ObjectParams);
+
+        for (const FOverlapResult& Overlap : Overlaps)
+        {
+            UPrimitiveComponent* Other=Overlap.Component.Get();
+            if (!IsValid(Other) || InitialBlocking.Contains(Other)) continue;
+            const bool bBlocks=
+                Component->GetCollisionResponseToChannel(Other->GetCollisionObjectType())==ECR_Block
+                && Other->GetCollisionResponseToChannel(Component->GetCollisionObjectType())==ECR_Block;
+            if (!bBlocks) continue;
+
+            UE_LOG(LogTemp,Verbose,
+                TEXT("AP5_KINEMATIC_SWEEP_BLOCKED: context=%s step=%d/%d other=%s"),
+                Context,Step,Steps,*GetNameSafe(Other->GetOwner()));
+            return false;
+        }
+    }
+
+    Component->SetWorldTransform(
+        TargetWorld,false,nullptr,ETeleportType::TeleportPhysics);
+    return true;
+}
+
 void AAp5Monster::UpdateArmMotion(float DeltaSeconds)
 {
     if (!bArmMotionTest) return;
@@ -783,8 +919,8 @@ void AAp5Monster::UpdateArmMotion(float DeltaSeconds)
         State.OriginVelocity=VolumePoint(OriginVelocity);
         State.AngularVelocity=VolumePoint(Omega);
         const FTransform LocalTransform(Rotation,Translation);
-        PieceMeshes[I]->SetWorldTransform(
-            LocalTransform*GetActorTransform(),false,nullptr,ETeleportType::TeleportPhysics);
+        TrySetDrivenPieceTransform(
+            PieceMeshes[I],LocalTransform*GetActorTransform(),TEXT("arm"));
     }
 }
 
@@ -1261,8 +1397,8 @@ void AAp5Monster::UpdateLegMotion(float DeltaSeconds)
             EnginePoint(State.AxisX),EnginePoint(State.AxisY)).ToQuat();
         const FTransform LocalTransform(
             Rotation,EnginePoint(State.ToWorld(Ap5Volume::Point())));
-        PieceMeshes[I]->SetWorldTransform(
-            LocalTransform*GetActorTransform(),false,nullptr,ETeleportType::TeleportPhysics);
+        TrySetDrivenPieceTransform(
+            PieceMeshes[I],LocalTransform*GetActorTransform(),TEXT("leg"));
     }
 
     // 足裏材料が残っていても、その下に床がなければ支持喪失。
