@@ -10,10 +10,35 @@
 #include "Engine/StaticMeshActor.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
+#include "HAL/IConsoleManager.h"
+#include "PhysicsEngine/PhysicsSettings.h"
 #include "Materials/MaterialInterface.h"
 #include "UObject/ConstructorHelpers.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogAp5, Log, All);
+
+namespace
+{
+int32 ReadChaosIterationCVar(const TCHAR* Name)
+{
+    const IConsoleVariable* Variable=IConsoleManager::Get().FindConsoleVariable(Name);
+    return Variable!=nullptr ? Variable->GetInt() : -999;
+}
+
+void LogPhysicsConfiguration()
+{
+    const UPhysicsSettings* Settings=GetDefault<UPhysicsSettings>();
+    UE_LOG(LogAp5,Display,
+        TEXT("AP5_PHYSICS_CONFIG: pos_iter=%d vel_iter=%d proj_iter=%d substep=%d max_substep_ms=%.3f max_substeps=%d max_physics_ms=%.3f"),
+        ReadChaosIterationCVar(TEXT("p.Chaos.Solver.Iterations.Position")),
+        ReadChaosIterationCVar(TEXT("p.Chaos.Solver.Iterations.Velocity")),
+        ReadChaosIterationCVar(TEXT("p.Chaos.Solver.Iterations.Projection")),
+        Settings!=nullptr && Settings->bSubstepping ? 1 : 0,
+        Settings!=nullptr ? Settings->MaxSubstepDeltaTime*1000.0f : 0.0f,
+        Settings!=nullptr ? Settings->MaxSubsteps : 0,
+        Settings!=nullptr ? Settings->MaxPhysicsDeltaTime*1000.0f : 0.0f);
+}
+}
 
 AAp5GameMode::AAp5GameMode()
 {
@@ -28,6 +53,7 @@ AAp5GameMode::AAp5GameMode()
 void AAp5GameMode::StartPlay()
 {
     Super::StartPlay();
+    LogPhysicsConfiguration();
     UWorld* World = GetWorld();
     if (World == nullptr || FloorMesh == nullptr)
     {
