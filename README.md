@@ -7,6 +7,7 @@ Blueprint作成、手動のモデル配置、手動のマップ保存は不要�
 ## 開発用チャット
 
 - [ap5の開発相談・作業履歴（ChatGPT）](https://chatgpt.com/g/g-p-6ac4eed49c9081918e38aa51c51b7129-ap5/c/6ac57688-3748-83e8-9271-5414fd4e9413)
+- [物理シミュレーション設計レビュー（HTML）](docs/physics_design_review.html)
 
 ## 対象環境
 
