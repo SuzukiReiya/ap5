@@ -15,6 +15,7 @@
 #include "PhysicsEngine/PhysicsConstraintComponent.h"
 #include "Math/RotationMatrix.h"
 #include "Engine/World.h"
+#include "Engine/OverlapResult.h"
 #include "UObject/ConstructorHelpers.h"
 
 namespace
