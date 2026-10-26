@@ -28,6 +28,9 @@ struct Piece
     int ParentDriveId=-1;
     // 駆動解除後も元の部位を識別するID。分離した子にも継承し、物理関節の付け替えに使う。
     int StructureId=-1;
+    // 元部位に対する残存率から、軽量primitiveを使える損傷量か判定する。
+    // 分離した子にも同じ値を継承し、不規則な小破片を元のCapsuleへ戻さない。
+    int InitialMaterialSamples=0;
     Point JointPivot, JointAnchor, ParentAnchor;
     // 足裏接地判定用。初期形状の最下段材料点を保持し、破壊後はVolume.Sampleで残存確認する。
     std::vector<Point> GroundSupportPoints;
@@ -96,6 +99,7 @@ public:
         SupportPoints=SupportUsesStability ? Initial.LowestMaterialPoints() : Supports;
         Piece Body;
         Body.Volume=Initial;
+        Body.InitialMaterialSamples=Initial.MaterialCount();
         Body.Fixed=HasStableSupport(Initial);
         Items.push_back(std::move(Body));
     }
@@ -132,6 +136,7 @@ public:
         {
             Piece Part;
             Part.Volume=std::move(Parts[I]);
+            Part.InitialMaterialSamples=Part.Volume.MaterialCount();
             Part.Driven=(I==DrivenIndex);
             Part.DriveId=Part.Driven ? 0 : -1;
             Part.Fixed=Part.Driven || HasStableSupport(Part.Volume);
@@ -155,6 +160,7 @@ public:
         Piece Root;
         Root.Volume=Body;
         Root.StructureId=0;
+        Root.InitialMaterialSamples=Body.MaterialCount();
         Root.Fixed=HasSupport(Root.Volume);
         if (!Root.Fixed) return false;
         Items.push_back(std::move(Root));
@@ -173,6 +179,7 @@ public:
             Part.DriveId=Setup.DriveId;
             Part.ParentDriveId=Setup.ParentDriveId;
             Part.StructureId=Setup.DriveId;
+            Part.InitialMaterialSamples=Setup.Volume.MaterialCount();
             Part.Fixed=true;
             Part.JointPivot=Setup.JointPivot;
             Part.JointAnchor=Setup.JointAnchor;
@@ -587,6 +594,7 @@ private:
         ParentState.DriveId=Items[Index].DriveId;
         ParentState.ParentDriveId=Items[Index].ParentDriveId;
         ParentState.StructureId=Items[Index].StructureId;
+        ParentState.InitialMaterialSamples=Items[Index].InitialMaterialSamples;
         ParentState.JointPivot=Items[Index].JointPivot;
         ParentState.JointAnchor=Items[Index].JointAnchor;
         ParentState.ParentAnchor=Items[Index].ParentAnchor;
@@ -603,6 +611,7 @@ private:
         Items[Index].DriveId=Items[Index].Driven ? ParentState.DriveId : -1;
         Items[Index].ParentDriveId=Items[Index].Driven ? ParentState.ParentDriveId : -1;
         Items[Index].StructureId=ParentState.StructureId;
+        Items[Index].InitialMaterialSamples=ParentState.InitialMaterialSamples;
         Items[Index].JointPivot=ParentState.JointPivot;
         Items[Index].ParentAnchor=ParentState.ParentAnchor;
         Items[Index].JointAnchor=ParentState.JointAnchor;
