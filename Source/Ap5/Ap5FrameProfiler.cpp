@@ -28,6 +28,7 @@ const TCHAR* ProcessNames[] =
     TEXT("物理衝突状態設定"),
     TEXT("物理Simulation切替"),
     TEXT("物理速度復元"),
+    TEXT("駆動部位Sweep"),
     TEXT("コンポーネント生成"),
     TEXT("プロファイラI/O"),
     TEXT("FPS制限待機"),
