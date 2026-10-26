@@ -126,6 +126,23 @@ public:
         return Count;
     }
 
+    bool MaterialBounds(Point& Low,Point& High) const
+    {
+        bool Found=false;
+        Low=Point(1e9,1e9,1e9);
+        High=Point(-1e9,-1e9,-1e9);
+        for (int Z=0;Z<NZ;++Z) for (int Y=0;Y<NY;++Y) for (int X=0;X<NX;++X)
+        {
+            if (Values[Index(X,Y,Z)]>=0) continue;
+            const Point P=Position(X,Y,Z);
+            Low=Point(std::min(Low.X,P.X),std::min(Low.Y,P.Y),std::min(Low.Z,P.Z));
+            High=Point(std::max(High.X,P.X),std::max(High.Y,P.Y),std::max(High.Z,P.Z));
+            Found=true;
+        }
+        if (!Found) { Low=Point(); High=Point(); }
+        return Found;
+    }
+
     Point MaterialCentroid() const
     {
         Point Sum;
