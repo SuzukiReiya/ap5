@@ -21,6 +21,7 @@ enum class EAp5ProfileProcess : uint8
     PhysicsCollisionState,
     PhysicsSimulationToggle,
     PhysicsVelocityRestore,
+    KinematicSweep,
     ComponentCreate,
     ProfilerIO,
     FrameLimiterWait,
