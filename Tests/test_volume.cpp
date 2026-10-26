@@ -497,8 +497,14 @@ int main()
             assert((P.OriginVelocity-Point(10,20,-30)).Length()<1e-9);
         }
     }
-    // 衝突箱は材料内部のセルをまとめたもの。貫通穴の中心をふさがない。
+    // Collision primitive選択用の材料境界は、実際に残る材料点だけを囲む。
     Field CollisionVolume; CollisionVolume.Initialize(Point(40,43,47));
+    Point CollisionLow,CollisionHigh;
+    assert(CollisionVolume.MaterialBounds(CollisionLow,CollisionHigh));
+    assert(CollisionLow.X<0 && CollisionHigh.X>0);
+    assert(CollisionLow.Y<0 && CollisionHigh.Y>0);
+    assert(CollisionLow.Z<0 && CollisionHigh.Z>0);
+    // 衝突箱は材料内部のセルをまとめたもの。貫通穴の中心をふさがない。
     const size_t BeforeBoxes=CollisionVolume.CollisionBoxes().size();
     assert(BeforeBoxes>0);
     CollisionVolume.Brush(Point(-200,0,0),Point(1,0,0),15,false);
@@ -773,8 +779,12 @@ int main()
     }
     for (int I=1;I<=4;++I) assert(DriveCount[I]==1);
     assert(Scene.Items[0].StructureId==0);
+    assert(Scene.Items[0].InitialMaterialSamples==WalkBody.MaterialCount());
     for (size_t I=1;I<Scene.Items.size();++I)
+    {
         assert(Scene.Items[I].StructureId==Scene.Items[I].DriveId);
+        assert(Scene.Items[I].InitialMaterialSamples==Scene.Items[I].Volume.MaterialCount());
+    }
 
     // 関節残存判定は単一点ではなく15cm球内の材料サンプル数を使う。
     const int JointSamplesBefore=
