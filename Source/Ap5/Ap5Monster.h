@@ -54,6 +54,8 @@ private:
     void RefreshPieces(const std::vector<int>& Changed);
     void UpdateArmMotion(float DeltaSeconds);
     void UpdateLegMotion(float DeltaSeconds);
+    bool TrySetDrivenPieceTransform(UDynamicMeshComponent* Component,
+        const FTransform& TargetWorld,const TCHAR* Context);
     bool GetDrivenFootContactLocal(int32 DriveId,FVector& ContactLocal) const;
     bool GetDrivenFootGroundContact(int32 DriveId,FVector& ContactLocal,FVector& GroundWorld) const;
     void CollapseWalkingBody(int32 FailedSupportDriveId);
