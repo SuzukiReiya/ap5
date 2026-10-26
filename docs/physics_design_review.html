@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AP5 物理シミュレーション設計レビュー</title>
+<style>
+:root{
+  --bg:#0f172a; --panel:#111827; --panel2:#172033; --text:#e5e7eb; --muted:#9ca3af;
+  --accent:#60a5fa; --good:#34d399; --warn:#fbbf24; --bad:#f87171; --line:#334155;
+}
+*{box-sizing:border-box}
+body{margin:0;font-family:"Segoe UI","Yu Gothic UI","Meiryo",sans-serif;background:var(--bg);color:var(--text);line-height:1.55}
+main{max-width:1180px;margin:0 auto;padding:28px}
+header{padding:26px 28px;border:1px solid var(--line);border-radius:18px;background:linear-gradient(145deg,#111827,#172033)}
+h1{margin:0 0 8px;font-size:32px} h2{font-size:23px;margin:0 0 14px} h3{font-size:17px;margin:0 0 8px}
+small,.muted{color:var(--muted)}
+.grid{display:grid;grid-template-columns:repeat(12,1fr);gap:16px;margin-top:18px}
+.card{grid-column:span 6;background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:20px}
+.card.full{grid-column:1/-1}.card.third{grid-column:span 4}
+.kpi{font-size:28px;font-weight:700;color:var(--accent)}
+.badge{display:inline-block;padding:3px 9px;border-radius:999px;border:1px solid var(--line);margin-right:6px;font-size:12px}
+.good{color:var(--good)} .warn{color:var(--warn)} .bad{color:var(--bad)}
+table{width:100%;border-collapse:collapse;margin-top:10px}
+th,td{border-bottom:1px solid var(--line);padding:9px 8px;text-align:left;vertical-align:top}
+th{color:#bfdbfe;font-weight:600}
+.flow{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:12px 0}
+.node{padding:10px 14px;border:1px solid #475569;border-radius:12px;background:var(--panel2)}
+.arrow{color:var(--accent);font-weight:700}
+pre{white-space:pre-wrap;background:#0b1220;border:1px solid var(--line);padding:14px;border-radius:12px;color:#dbeafe}
+ul{margin:8px 0 0 20px;padding:0}
+strong{color:#f8fafc}
+.note{border-left:4px solid var(--accent);padding:10px 12px;background:#0b1220;border-radius:8px}
+@media(max-width:800px){.card,.card.third{grid-column:1/-1}main{padding:14px}h1{font-size:26px}}
+</style>
+</head>
+<body>
+<main>
+<header>
+  <h1>AP5 物理シミュレーション設計レビュー</h1>
+  <div class="muted">レビュー用途：PowerPoint相当の情報密度で、実装方式・精度/負荷トレード・残課題を短時間で確認する。</div>
+  <div style="margin-top:12px">
+    <span class="badge">UE / Chaos</span>
+    <span class="badge">5 cm Volume Field</span>
+    <span class="badge">DynamicMesh</span>
+    <span class="badge">CCD / Sweep</span>
+    <span class="badge">Hybrid Collision</span>
+  </div>
+</header>
+
+<section class="grid">
+  <article class="card full">
+    <h2>1. 全体方針</h2>
+    <div class="flow">
+      <div class="node">破壊・形状<br><strong>AP5独自 Volume Field</strong></div>
+      <div class="arrow">→</div>
+      <div class="node">表示<br><strong>DynamicMesh</strong></div>
+      <div class="arrow">＋</div>
+      <div class="node">物理形状<br><strong>Capsule / Box群</strong></div>
+      <div class="arrow">→</div>
+      <div class="node">運動・接触・関節<br><strong>Chaos</strong></div>
+    </div>
+    <div class="note">
+      破壊形状をChaos任せにはせず、AP5が5 cm格子で保持する。Chaosは「できあがった剛体形状の運動」を担当する。
+      これにより穴あけ・切断・再接合を制御しつつ、落下・衝突・関節はゲーム向け物理へ委譲する。
+    </div>
+  </article>
+
+  <article class="card third">
+    <h3>剛体ソルバ</h3>
+    <div class="kpi">反復法</div>
+    <div>Chaosの拘束ソルバを使用。直接法で連立方程式を一括解法する構成ではない。</div>
+  </article>
+  <article class="card third">
+    <h3>形状表現</h3>
+    <div class="kpi">5 cm</div>
+    <div>符号付き体積値の格子。穴あけ・爆発・切断・連結判定の共通表現。</div>
+  </article>
+  <article class="card third">
+    <h3>破片上限</h3>
+    <div class="kpi">33</div>
+    <div>極端な分割によるCPU・Physics Body増加を抑える安全上限。</div>
+  </article>
+
+  <article class="card full">
+    <h2>2. Chaos Solver設定</h2>
+    <table>
+      <tr><th>項目</th><th>現行値</th><th>設計意図</th></tr>
+      <tr><td>Position iterations</td><td><strong>4</strong></td><td>接触貫通・関節位置誤差の補正。サブステップ併用で1 step当たりの反復を抑える。</td></tr>
+      <tr><td>Velocity iterations</td><td><strong>1</strong></td><td>反発・摩擦側のコストを抑える初期値。</td></tr>
+      <tr><td>Projection iterations</td><td><strong>1</strong></td><td>大きな拘束誤差の補助。</td></tr>
+      <tr><td>Physics substep</td><td><strong>最大120 Hz相当</strong></td><td>60 FPS時は概ね2 substeps。高速接触と関節安定性を時間分解能で補う。</td></tr>
+      <tr><td>Max substeps</td><td><strong>4</strong></td><td>フレーム落ち時の暴走を制限。</td></tr>
+    </table>
+    <p class="muted">起動時に AP5_PHYSICS_CONFIG を出力し、エンジン側で値が上書きされていないか実効値を確認する。</p>
+  </article>
+
+  <article class="card">
+    <h2>3. Collision primitive</h2>
+    <table>
+      <tr><th>状態</th><th>形状</th></tr>
+      <tr><td>右腕・大腿、残存材料85%以上</td><td><strong>Capsule</strong></td></tr>
+      <tr><td>損傷が大きい部位</td><td><strong>格子由来Box群</strong></td></tr>
+      <tr><td>下腿＋足</td><td><strong>Box群</strong></td></tr>
+      <tr><td>不規則な分離破片</td><td><strong>Box群</strong></td></tr>
+    </table>
+    <p>無傷時はprimitive数を減らし、丸い四肢の接触法線を滑らかにする。破壊後は穴・欠損を埋めないことを優先してBox群へ戻す。</p>
+  </article>
+
+  <article class="card">
+    <h2>4. Box群生成</h2>
+    <div class="flow">
+      <div class="node">5 cm格子</div><div class="arrow">→</div>
+      <div class="node">8頂点すべて材料内</div><div class="arrow">→</div>
+      <div class="node">隣接セルを結合</div><div class="arrow">→</div>
+      <div class="node">FKBoxElem</div>
+    </div>
+    <p>DynamicMeshの三角形をそのままComplex Collisionには使わない。破壊ごとのCollision Cook負荷を避けるため、内部セルから単純形状を再構成する。</p>
+  </article>
+
+  <article class="card full">
+    <h2>5. すり抜け防止</h2>
+    <table>
+      <tr><th>対象</th><th>方式</th><th>評価</th></tr>
+      <tr><td>弾</td><td>ProjectileMovement substep + Sphere collision + AP5独自 swept volume + 接触区間の二分探索</td><td class="good"><strong>強い</strong></td></tr>
+      <tr><td>自由破片</td><td>Chaos CCD。物理シミュレーション中のPieceだけ有効化</td><td class="good"><strong>強い</strong></td></tr>
+      <tr><td>駆動腕・脚</td><td>Teleport前にComponent geometryを5 cm / 5°刻みで経路Overlap確認、最大12分割</td><td class="warn"><strong>改善済み・要実機評価</strong></td></tr>
+      <tr><td>足裏</td><td>WorldStaticへの下向きLineTrace</td><td class="good"><strong>接地確認用</strong></td></tr>
+    </table>
+    <p>駆動部位は開始時から接触している床等を許容し、経路途中で新しく発生したblocking overlapだけを障害として扱う。</p>
+  </article>
+
+  <article class="card">
+    <h2>6. 弾の接触判定</h2>
+    <pre>前フレーム A ●────────────● B 現フレーム
+             ↓ 数 cm刻みで探索
+       distance(material) <= bullet radius
+             ↓
+       最初の交差区間を5回二分
+             ↓
+            着弾</pre>
+    <p>1フレームで弾径以上進んでも、端点だけで判定しないためトンネリングを抑制する。</p>
+  </article>
+
+  <article class="card">
+    <h2>7. 破壊と構造判定</h2>
+    <ul>
+      <li><strong>穴あけ・爆発：</strong>Volume Field上のCSG的な減算。</li>
+      <li><strong>分離：</strong>材料格子の連結成分探索。</li>
+      <li><strong>構造破断：</strong>断面材料量と支持材料量の比による簡易強度モデル。</li>
+      <li><strong>関節破断：</strong>関節周囲15 cmの材料残存数が初期値の25%未満でConstraint解除。</li>
+    </ul>
+    <p class="muted">FEMや弾塑性解析ではない。ゲーム性とリアルタイム性を優先した幾何・構造近似。</p>
+  </article>
+
+  <article class="card full">
+    <h2>8. 性能・精度トレード</h2>
+    <table>
+      <tr><th>ノブ</th><th>下げた場合</th><th>上げた場合</th></tr>
+      <tr><td>Position iterations</td><td>軽い / 関節伸び・貫通が増える可能性</td><td>重い / 拘束安定</td></tr>
+      <tr><td>Substep数</td><td>軽い / 高速運動に弱い</td><td>重い / 時間分解能向上</td></tr>
+      <tr><td>Collision primitive数</td><td>軽い / 穴や凹形状の再現性低下</td><td>重い / 形状追従性向上</td></tr>
+      <tr><td>Kinematic sweep分割</td><td>軽い / 細い障害物を飛び越える可能性</td><td>重い / 駆動部位の経路判定向上</td></tr>
+      <tr><td>CCD対象</td><td>軽い / 高速破片すり抜けリスク</td><td>重い / 高速衝突に強い</td></tr>
+    </table>
+  </article>
+
+  <article class="card">
+    <h2>9. 評価項目</h2>
+    <ul>
+      <li>破片落下時の最大貫通量</li>
+      <li>ラグドール関節の伸び・振動</li>
+      <li>高速破片の床・壁すり抜け</li>
+      <li>腕振り・歩行時の壁抜け</li>
+      <li>Capsule→Box切替時の接触ジャンプ</li>
+      <li>Collision更新時間 / Slow-frame率</li>
+    </ul>
+  </article>
+
+  <article class="card">
+    <h2>10. 次の設計判断</h2>
+    <ul>
+      <li><span class="good">優先：</span>4/1/1 + 120 Hz相当を基準に実機プロファイル。</li>
+      <li><span class="good">優先：</span>駆動Sweepで壁際歩行・高速腕振りを試験。</li>
+      <li><span class="warn">比較：</span>Position 4 / 6 / 8を同一シーンで比較。</li>
+      <li><span class="warn">比較：</span>Capsule適用率85%の妥当性を確認。</li>
+      <li><span class="muted">将来：</span>Convex分解、XPBD/FEM等は必要性が出た段階で検討。</li>
+    </ul>
+  </article>
+
+  <article class="card full">
+    <h2>11. レビュー観点</h2>
+    <table>
+      <tr><th>問い</th><th>現在の回答</th></tr>
+      <tr><td>リアルタイム性を優先しているか</td><td>Yes。単純primitive、反復回数抑制、破片上限を採用。</td></tr>
+      <tr><td>穴・切断を物理近似で失っていないか</td><td>破壊後はBox群へフォールバックして保持。</td></tr>
+      <tr><td>高速移動のすり抜け対策はあるか</td><td>弾・自由破片・駆動部位で別々の対策を持つ。</td></tr>
+      <tr><td>設定変更の効果を比較できるか</td><td>Solver実効値ログと既存Slow-frame profilerで比較可能。駆動Sweep時間も追加。</td></tr>
+      <tr><td>本物の構造解析か</td><td>No。現状はゲーム向け簡易モデル。必要なら将来拡張。</td></tr>
+    </table>
+  </article>
+</section>
+
+<p class="muted" style="margin-top:22px">AP5 design review document / self-contained HTML / 更新対象: 物理ソルバ・衝突・破壊・すり抜け対策</p>
+</main>
+</body>
+</html>
